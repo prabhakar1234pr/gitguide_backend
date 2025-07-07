@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routes import ping
+from app.routes import ping,projects
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -14,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(ping.router)
+app.include_router(projects.router)
 
 @app.get("/")
 def root():
