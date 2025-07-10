@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routes import ping,projects
+from app.routes import ping, projects, tasks, agent, chat
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -15,6 +15,9 @@ app.add_middleware(
 
 app.include_router(ping.router)
 app.include_router(projects.router)
+app.include_router(tasks.router)
+app.include_router(agent.router)
+app.include_router(chat.router)
 
 @app.get("/")
 def root():
