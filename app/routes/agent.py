@@ -162,7 +162,11 @@ async def process_project_background(project_id: int, user_id: str):
     except Exception as e:
         print(f"❌ Background processing failed for project {project_id}: {str(e)}")
 
-@router.post("/agent/process")
+@router.post("/agent/process",
+    summary="Generate Learning Path",
+    description="Trigger AI agent to analyze GitHub repository and generate personalized learning path",
+    response_description="Processing confirmation with status"
+)
 async def trigger_agent_processing(
     request: AgentProcessRequest,
     background_tasks: BackgroundTasks,
@@ -218,7 +222,11 @@ async def trigger_agent_processing(
             print(f"❌ Error triggering agent: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to trigger agent: {str(e)}")
 
-@router.get("/agent/status/{project_id}")
+@router.get("/agent/status/{project_id}",
+    summary="Check Processing Status", 
+    description="Check the current processing status of AI learning path generation",
+    response_description="Processing status and completion details"
+)
 async def get_agent_status(
     project_id: int,
     authorization: str = Header(None)
@@ -269,7 +277,11 @@ async def get_agent_status(
             print(f"❌ Error getting agent status: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
-@router.get("/agent/health")
+@router.get("/agent/health",
+    summary="Agent Health Check",
+    description="Check if AI agent service is available and properly configured",
+    response_description="Agent service status and configuration details"
+)
 async def agent_health_check():
     """Check if the agent service is available"""
     

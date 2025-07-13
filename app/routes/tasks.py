@@ -32,7 +32,12 @@ class TaskResponse(BaseModel):
     class Config:
         from_attributes = True
 
-@router.post("/tasks", response_model=TaskResponse)
+@router.post("/tasks", 
+    response_model=TaskResponse,
+    summary="Create New Task",
+    description="Create a new learning task for a specific project",
+    response_description="Created task details"
+)
 async def create_task(
     data: TaskCreateRequest,
     authorization: str = Header(None)
@@ -75,7 +80,12 @@ async def create_task(
             print(f"❌ Error creating task: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
 
-@router.get("/projects/{project_id}/tasks", response_model=List[TaskResponse])
+@router.get("/projects/{project_id}/tasks", 
+    response_model=List[TaskResponse],
+    summary="Get Project Tasks",
+    description="Retrieve all learning tasks for a specific project, ordered by sequence",
+    response_description="List of tasks with progress status"
+)
 async def get_project_tasks(
     project_id: int,
     authorization: str = Header(None)

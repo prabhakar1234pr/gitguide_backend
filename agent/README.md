@@ -29,13 +29,19 @@ The GitGuide Agent analyzes GitHub repositories and creates structured learning 
 ## Architecture
 
 ```
-agent/
-├── main.py                  # Main orchestrator
-├── repository_analyzer.py   # GitHub API integration
-├── learning_path_generator.py # LLM-powered content generation
-├── api_client.py           # Backend database integration
-├── test_agent.py           # API testing utilities
-└── requirements.txt        # Python dependencies
+gitguide_backend/
+├── agent/                   # AI Agent Package
+│   ├── main.py             # Main orchestrator
+│   ├── repository_analyzer.py  # GitHub API integration
+│   ├── learning_path_generator.py  # LLM integration
+│   └── api_client.py       # Backend database integration
+├── prompts/                # LLM Prompt Templates
+│   ├── learning_path_prompts.py  # Learning path generation prompts
+│   ├── chat_prompts.py     # Chat assistant prompts
+│   └── README.md           # Prompt documentation
+└── app/routes/             # API Integration
+    ├── agent.py           # Agent processing endpoints
+    └── chat.py            # Chat assistant endpoints
 ```
 
 ## Setup
@@ -100,14 +106,14 @@ result = await agent.process_new_project(
 
 ### Testing
 ```bash
-# Test API connections
-python test_agent.py
+# Test the agent directly
+python -c "from agent.main import GitGuideAgent; import asyncio; asyncio.run(test_agent())"
 
-# Test repository analysis
-python test_simple.py
+# Test imports
+python -c "from agent import GitGuideAgent; print('Agent imports working')"
 
-# Test full agent pipeline
-python test_full_agent.py
+# Test prompts
+python -c "from prompts import create_analysis_prompt; print('Prompts working')"
 ```
 
 ## API Integration
@@ -155,7 +161,7 @@ The agent integrates with the GitGuide backend through several steps:
 
 ### Model Settings
 - **LLM Model**: `llama3-70b-8192` (Groq)
-- **Max Tokens**: 4000
+- **Max Tokens**: 4000 (learning path), 1000 (chat)
 - **Temperature**: 0.7
 - **File Size Limit**: 400KB total context
 
@@ -163,6 +169,27 @@ The agent integrates with the GitGuide backend through several steps:
 - **Supported Extensions**: `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.java`, `.cpp`, etc.
 - **Priority Files**: `README.md`, `package.json`, `requirements.txt`, etc.
 - **Excluded Directories**: `node_modules`, `.git`, `dist`, `__pycache__`, etc.
+
+### Prompt Engineering
+All LLM prompts are centralized in the `../prompts/` directory:
+
+- **Learning Path Prompts** (`learning_path_prompts.py`):
+  - Repository context preparation
+  - Structured learning path generation
+  - JSON format enforcement
+  - Skill-level adaptation
+
+- **Chat Prompts** (`chat_prompts.py`):
+  - Context-aware tutoring
+  - Repository file integration
+  - Task-specific guidance
+  - Progressive difficulty adjustment
+
+**Prompt Optimization:**
+- File content limited to 1000-2000 chars per file
+- Repository samples limited to 10 most relevant files
+- Structured sections for better LLM understanding
+- Real file references for actionable tasks
 
 ## Performance
 
@@ -172,9 +199,10 @@ The agent integrates with the GitGuide backend through several steps:
 - **Large repos** (200+ files): 1-3 minutes
 
 ### API Costs (Estimated)
-- **Repository Analysis**: ~$2-12 per project
-- **Chat Messages**: ~$0.10-0.50 per message
-- **Monthly Usage**: ~$50-130 for moderate use
+- **Repository Analysis**: ~$2-12 per project (depends on repository size)
+- **Learning Path Generation**: ~$0.05-0.15 per project (included in analysis)
+- **Chat Messages**: ~$0.10-0.50 per message (context-aware responses)
+- **Monthly Usage**: ~$50-130 for moderate use (50-100 projects + chat)
 
 ## Error Handling
 
@@ -210,17 +238,31 @@ The agent includes comprehensive error handling:
 
 ### Adding New Features
 1. **Repository Analysis**: Modify `repository_analyzer.py`
-2. **Learning Generation**: Update prompts in `learning_path_generator.py`
-3. **Database Integration**: Extend `api_client.py`
+2. **Prompt Engineering**: Update templates in `../prompts/` directory
+   - `learning_path_prompts.py` - Learning path generation
+   - `chat_prompts.py` - Chat assistant interactions
+3. **Learning Generation**: Extend logic in `learning_path_generator.py`
+4. **Database Integration**: Extend `api_client.py`
+5. **API Endpoints**: Add new routes in `../app/routes/`
 
 ### Testing New Repositories
 ```python
-# Add to test_full_agent.py
-test_cases.append({
-    "repo_url": "https://github.com/your/repo",
-    "skill_level": "Pro",
-    "domain": "Your Domain"
-})
+# Direct testing approach
+from agent.main import GitGuideAgent
+import asyncio
+
+async def test_new_repo():
+    agent = GitGuideAgent()
+    result = await agent.process_new_project(
+        project_id=999,
+        repo_url="https://github.com/your/repo",
+        skill_level="Pro",
+        domain="Your Domain",
+        user_id="test_user"
+    )
+    print(f"Result: {result}")
+
+asyncio.run(test_new_repo())
 ```
 
 ## Troubleshooting
@@ -236,11 +278,18 @@ test_cases.append({
 - Check Groq API key is valid
 - Verify internet connection
 - Review repository content (might be too large/small)
+- Check prompts directory imports are working
 
 **"Database save failed"**
 - Ensure backend is running on localhost:8000
 - Check database connection
 - Verify project_id exists in database
+
+**"Prompt import errors"**
+- Ensure prompts directory is in Python path
+- Check that `../prompts/` directory exists
+- Verify `__init__.py` file is present in prompts directory
+- Try running from correct working directory
 
 ### Debug Mode
 Set environment variable for verbose logging:

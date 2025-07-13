@@ -11,9 +11,16 @@ A FastAPI-based backend for the GitGuide application that transforms GitHub repo
 ### Environment Configuration
 Create a `.env` file in the backend directory:
 ```env
+# Database
 DATABASE_URL=postgresql+asyncpg://username:password@host:port/database
 ENVIRONMENT=development
+
+# Authentication
 CLERK_SECRET_KEY=sk_test_your_clerk_secret_key_here
+
+# AI Features (required for agent and chat)
+GROQ_API_KEY=gsk_your_groq_api_key_here
+GITHUB_ACCESS_TOKEN=ghp_your_github_token_here
 ```
 
 ### Database Schema Management
@@ -93,11 +100,38 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## 🏗️ Architecture
 
+### Directory Structure
+```
+gitguide_backend/
+├── app/                     # Main FastAPI application
+│   ├── routes/             # API endpoints
+│   │   ├── agent.py       # Agent processing endpoints
+│   │   ├── chat.py        # AI chat assistant
+│   │   ├── projects.py    # Project management
+│   │   └── tasks.py       # Task management
+│   ├── models.py          # Database models
+│   ├── db.py             # Database connection
+│   └── main.py           # FastAPI app initialization
+├── agent/                  # AI agent system
+│   ├── main.py           # Agent orchestrator
+│   ├── repository_analyzer.py  # GitHub API integration
+│   ├── learning_path_generator.py  # LLM integration
+│   └── api_client.py     # Database integration
+├── prompts/               # LLM prompt templates
+│   ├── learning_path_prompts.py  # Learning path generation
+│   ├── chat_prompts.py   # Chat assistant prompts
+│   └── README.md         # Prompt documentation
+└── migrate_database.py   # Database migration script
+```
+
+### Technology Stack
 - **FastAPI**: Modern async web framework
 - **SQLAlchemy**: Async ORM for database operations
 - **PostgreSQL**: Production-ready relational database
 - **Pydantic**: Data validation and serialization
 - **Clerk**: Authentication and user management
+- **Groq LLM**: AI-powered learning path generation and chat
+- **GitHub API**: Repository analysis and content extraction
 
 ## 📊 API Endpoints
 
@@ -115,6 +149,14 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### Users
 - `GET /users/{user_id}` - Get user details by Clerk user ID
+
+### AI Agent & Chat
+- `POST /agent/process` - Trigger AI learning path generation for a project
+- `GET /agent/status/{project_id}` - Check processing status
+- `GET /agent/health` - Agent service health check
+- `POST /chat/project/{project_id}` - Context-aware chat with AI tutor
+- `GET /chat/project/{project_id}/context` - Get available chat context
+- `GET /chat/health` - Chat service health check
 
 ### System
 - `GET /ping` - Health check endpoint
@@ -145,4 +187,43 @@ Authentication is handled via Clerk. All project and task endpoints require vali
 - **BigInteger IDs**: Supports large ID values for scalability
 - **Enum Status**: Strict task status validation
 - **Foreign Key Constraints**: Ensures data integrity
-- **Cascade Operations**: Automatic cleanup of related data 
+- **Cascade Operations**: Automatic cleanup of related data
+
+## 🤖 AI Features & Prompts
+
+### Learning Path Generation
+The GitGuide Agent automatically analyzes GitHub repositories and creates structured learning paths using advanced LLM technology.
+
+**Process Flow:**
+1. **Repository Analysis**: Scans GitHub repo structure and extracts key files
+2. **Content Generation**: Uses Groq LLM to create personalized learning content
+3. **Database Storage**: Saves hierarchical learning structure (Concepts → Subtopics → Tasks)
+
+### Context-Aware Chat Assistant
+An AI tutor that provides personalized guidance based on the specific repository and learning progress.
+
+**Features:**
+- Full repository context awareness
+- Current task and progress tracking
+- Skill-level adaptive responses
+- Real-time code explanations
+
+### Prompt Engineering
+All LLM prompts are centralized in the `prompts/` directory for easy maintenance and optimization:
+
+- **Learning Path Prompts**: Repository analysis and learning structure generation
+- **Chat Prompts**: Context-aware tutoring and code assistance
+- **Modular Design**: Easy to extend with new prompt types
+
+### Environment Variables
+```env
+# Required for AI features
+GROQ_API_KEY=gsk_your_groq_api_key_here
+GITHUB_ACCESS_TOKEN=ghp_your_github_token_here
+```
+
+### Performance
+- **Learning Path Generation**: 10-60 seconds per repository
+- **Chat Responses**: 1-3 seconds per message
+- **Repository Analysis**: Supports repos up to 200+ files
+- **Cost Efficient**: Optimized prompts minimize API usage 

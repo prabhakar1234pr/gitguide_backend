@@ -72,7 +72,11 @@ async def get_user_details_from_clerk(user_id: str):
         print(f"Error fetching user details: {e}")
         return {"name": "Unknown User", "email": "unknown@example.com"}
 
-@router.post("/projects")
+@router.post("/projects", 
+    summary="Create New Project",
+    description="Create a new learning project from a GitHub repository URL",
+    response_description="Project creation confirmation with project ID"
+)
 async def create_project(
     data: ProjectCreateRequest,
     authorization: str = Header(None)
@@ -114,7 +118,11 @@ async def create_project(
             print(f"❌ Database error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to save project: {str(e)}")
 
-@router.get("/projects")
+@router.get("/projects",
+    summary="Get User Projects",
+    description="Retrieve all projects belonging to the authenticated user",
+    response_description="List of user's projects with metadata"
+)
 async def get_user_projects(authorization: str = Header(None)):
     """Get all projects for the authenticated user with user details"""
     user_id = extract_user_id_from_token(authorization)
@@ -156,7 +164,11 @@ async def get_user_projects(authorization: str = Header(None)):
             print(f"❌ Database error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to get projects: {str(e)}")
 
-@router.get("/projects/{project_id}")
+@router.get("/projects/{project_id}",
+    summary="Get Project Details", 
+    description="Retrieve detailed information about a specific project",
+    response_description="Complete project data including AI-generated content"
+)
 async def get_project_by_id(project_id: int, authorization: str = Header(None)):
     """Get a specific project by ID for the authenticated user"""
     logger.info(f"📋 Fetching project {project_id}")
@@ -230,7 +242,11 @@ async def delete_project(project_id: int, authorization: str = Header(None)):
             print(f"❌ Database error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
 
-@router.get("/projects/{project_id}/concepts")
+@router.get("/projects/{project_id}/concepts",
+    summary="Get Learning Path",
+    description="Retrieve the AI-generated learning path with concepts, subtopics, and tasks",
+    response_description="Hierarchical learning structure for the project"
+)
 async def get_project_concepts(project_id: int, authorization: str = Header(None)):
     """Get all concepts for a specific project"""
     logger.info(f"🎯 Fetching concepts for project {project_id}")

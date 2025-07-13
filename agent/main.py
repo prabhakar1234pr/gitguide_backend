@@ -1,9 +1,9 @@
 import os
 import asyncio
 from dotenv import load_dotenv
-from repository_analyzer import analyze_repository
-from learning_path_generator import generate_learning_path
-from api_client import save_learning_content
+from .repository_analyzer import analyze_repository
+from .learning_path_generator import generate_learning_path
+from .api_client import save_learning_content
 
 load_dotenv()
 
