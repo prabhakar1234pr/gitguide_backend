@@ -187,7 +187,7 @@ Authentication is handled via Clerk. All project and task endpoints require vali
 - **BigInteger IDs**: Supports large ID values for scalability
 - **Enum Status**: Strict task status validation
 - **Foreign Key Constraints**: Ensures data integrity
-- **Cascade Operations**: Automatic cleanup of related data
+- **Cascade Operations**: Automatic cleanup of related data 
 
 ## 🤖 AI Features & Prompts
 
