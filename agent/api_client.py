@@ -1,48 +1,144 @@
-import requests
-import asyncio
-import json
-import sys
+"""
+API client for GitGuide backend
+Handles communication with FastAPI backend
+"""
+
 import os
-from typing import Dict, List
+import json
+import aiohttp
+from typing import Dict, Any, Optional
+from sqlalchemy import select
+from app.database_models import Project, Concept, Subtopic, Task
+from app.database_config import SessionLocal
 
-# Add backend path for database access
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
-async def save_learning_content(project_id, learning_path, backend_url, user_id):
-    """
-    Save generated learning content to the backend database
-    
-    Args:
-        project_id: Database project ID
-        learning_path: Generated learning path from LLM
-        backend_url: Backend API URL
-        user_id: Clerk user ID
-        
-    Returns:
-        dict: Save operation result
-    """
-    try:
-        # Import the database saving function directly
-        from app.routes.agent import save_agent_content_to_db
-        
-        # Save content directly to database
-        result = await save_agent_content_to_db(
-            project_id=project_id,
-            learning_path=learning_path,
-            repo_info={'name': '', 'tech_stack': {}},  # Will be filled by agent
-        )
-        
-        return {
-            'success': True,
-            'message': 'Learning content saved to database',
-            'project_id': project_id
-        }
-        
-    except Exception as e:
-        return {
-            'success': False,
-            'error': f"Failed to save learning content: {str(e)}"
-        }
+async def save_learning_content(project_id: int, learning_path: Dict[str, Any], repo_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Save learning content to database directly"""
+    async with SessionLocal() as session:
+        try:
+            print(f"💾 Saving learning content for project {project_id}")
+            print(f"📊 Learning path structure: {json.dumps(learning_path, indent=2)[:1000]}...")
+            
+            # Update project with overview and metadata
+            result = await session.execute(
+                select(Project).filter(Project.project_id == project_id)
+            )
+            project = result.scalar_one_or_none()
+            
+            if not project:
+                raise Exception(f"Project {project_id} not found")
+            
+            # Update project overview
+            project.project_overview = learning_path.get('project_overview', '')
+            project.tech_stack = json.dumps(repo_info.get('tech_stack', []))
+            project.is_processed = True
+            
+            # Save concepts
+            concepts_data = learning_path.get('concepts', [])
+            print(f"📚 Processing {len(concepts_data)} concepts")
+            
+            for i, concept_data in enumerate(concepts_data):
+                print(f"📖 Concept {i+1}: {concept_data.get('name', 'Unnamed')}")
+                print(f"   ID: {concept_data.get('id', 'No ID')}")
+                print(f"   Subtopics: {len(concept_data.get('subTopics', []))}")
+                
+                concept = Concept(
+                    project_id=project_id,
+                    concept_external_id=concept_data['id'],
+                    name=concept_data['name'],
+                    description=concept_data.get('description', ''),
+                    order=int(concept_data['id'].split('-')[1]),
+                    is_unlocked=concept_data.get('isUnlocked', False)
+                )
+                session.add(concept)
+                await session.flush()
+                print(f"✅ Concept saved with ID: {concept.concept_id}")
+                
+                # Save subtopics
+                subtopics_data = concept_data.get('subtopics', concept_data.get('subTopics', []))
+                print(f"📝 Processing {len(subtopics_data)} subtopics for concept {concept.concept_id}")
+                
+                for j, subtopic_data in enumerate(subtopics_data):
+                    try:
+                        print(f"   📄 Subtopic {j+1}: {subtopic_data.get('name', 'Unnamed')}")
+                        print(f"      ID: {subtopic_data.get('id', 'No ID')}")
+                        
+                        # Check both 'tasks' and 'subTasks' keys
+                        tasks_count = len(subtopic_data.get('tasks', subtopic_data.get('subTasks', [])))
+                        print(f"      Tasks: {tasks_count}")
+                        
+                        # Safe order calculation - fallback to enumeration index
+                        try:
+                            subtopic_order = int(subtopic_data['id'].split('-')[2])
+                        except (IndexError, ValueError):
+                            subtopic_order = j + 1
+                            print(f"      ⚠️ Using fallback order: {subtopic_order}")
+                        
+                        subtopic = Subtopic(
+                            concept_id=concept.concept_id,
+                            subtopic_external_id=subtopic_data['id'],
+                            name=subtopic_data['name'],
+                            description=subtopic_data.get('description', ''),
+                            order=subtopic_order,
+                            is_unlocked=subtopic_data.get('isUnlocked', False)
+                        )
+                        session.add(subtopic)
+                        await session.flush()
+                        print(f"   ✅ Subtopic saved with ID: {subtopic.subtopic_id}")
+                        
+                        # Save tasks - check both keys
+                        tasks_data = subtopic_data.get('tasks', subtopic_data.get('subTasks', []))
+                        print(f"   📋 Processing {len(tasks_data)} tasks for subtopic {subtopic.subtopic_id}")
+                        
+                        for k, task_data in enumerate(tasks_data):
+                            try:
+                                print(f"      ⚡ Task {k+1}: {task_data.get('name', 'Unnamed')}")
+                                
+                                # Safe order calculation - fallback to enumeration index
+                                try:
+                                    task_order = int(task_data['id'].split('-')[3])
+                                except (IndexError, ValueError):
+                                    task_order = k + 1
+                                    print(f"         ⚠️ Using fallback task order: {task_order}")
+                                
+                                task = Task(
+                                    project_id=project_id,
+                                    subtopic_id=subtopic.subtopic_id,
+                                    task_external_id=task_data['id'],
+                                    title=task_data['name'],
+                                    description=task_data.get('description', ''),
+                                    order=task_order,
+                                    difficulty=task_data.get('difficulty', 'medium'),
+                                    files_to_study=json.dumps(task_data.get('files_to_study', [])),
+                                    is_unlocked=task_data.get('isUnlocked', False)
+                                )
+                                session.add(task)
+                                print(f"      ✅ Task saved: {task.title}")
+                                
+                            except Exception as task_error:
+                                print(f"      ❌ Failed to save task {k+1}: {str(task_error)}")
+                                import traceback
+                                traceback.print_exc()
+                                continue
+                                
+                    except Exception as subtopic_error:
+                        print(f"   ❌ Failed to save subtopic {j+1}: {str(subtopic_error)}")
+                        import traceback
+                        traceback.print_exc()
+                        continue
+            
+            await session.commit()
+            print("✅ All learning content saved successfully")
+            return {"success": True, "message": "Learning content saved successfully"}
+            
+        except Exception as e:
+            await session.rollback()
+            print(f"❌ Failed to save learning content: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'error': f"Failed to save learning content: {str(e)}"
+            }
 
 def create_task_description(concept, subtopic, task, project_overview):
     """Create a comprehensive task description"""

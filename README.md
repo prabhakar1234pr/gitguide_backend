@@ -1,83 +1,267 @@
 # GitGuide Backend
 
-A FastAPI-based backend for the GitGuide application that transforms GitHub repositories into personalized learning journeys with sequential tasks.
+🚀 **FastAPI-powered backend for GitGuide** - Transform GitHub repositories into personalized learning journeys with AI-generated learning paths and context-aware chat assistance.
 
-## 🗃️ Database Setup
+## 🌟 Overview
+
+GitGuide Backend is a sophisticated AI-powered learning platform that analyzes GitHub repositories and creates personalized, structured learning paths. It combines repository analysis, AI content generation, and interactive tutoring to provide a comprehensive learning experience.
+
+### Key Features
+
+- **🤖 AI Agent System**: Automated learning path generation using Groq LLM
+- **💬 Smart Chat Assistant**: Context-aware AI tutor with full project understanding
+- **📂 Project Management**: Complete GitHub repository analysis and learning path storage
+- **✅ Task Management**: Structured learning tasks with progress tracking
+- **🔐 Secure Authentication**: JWT-based authentication via Clerk
+- **📊 Database**: Async PostgreSQL with SQLAlchemy ORM
+- **📝 API Documentation**: Auto-generated Swagger/OpenAPI docs
+- **🔄 Regeneration System**: AI-powered content regeneration with custom prompts
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- PostgreSQL database (we recommend [Neon](https://neon.tech) for cloud hosting)
-- Python 3.8+
 
-### Environment Configuration
-Create a `.env` file in the backend directory:
+- Python 3.12+
+- PostgreSQL database
+- Groq API key (for AI features)
+- GitHub Personal Access Token
+- Clerk account (for authentication)
+
+### Installation
+
+```bash
+# Clone and navigate to backend
+cd gitguide_backend
+
+# Create and activate virtual environment
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Environment Setup
+
+Create a `.env` file in the root directory:
+
 ```env
 # Database
-DATABASE_URL=postgresql+asyncpg://username:password@host:port/database
-ENVIRONMENT=development
+DATABASE_URL=postgresql+asyncpg://username:password@localhost/gitguide_db
 
-# Authentication
-CLERK_SECRET_KEY=sk_test_your_clerk_secret_key_here
-
-# AI Features (required for agent and chat)
+# AI Services
 GROQ_API_KEY=gsk_your_groq_api_key_here
 GITHUB_ACCESS_TOKEN=ghp_your_github_token_here
+
+# Authentication
+CLERK_SECRET_KEY=sk_your_clerk_secret_key
+
+# Optional: Development settings
+DEBUG=True
+LOG_LEVEL=INFO
 ```
 
-### Database Schema Management
+### Database Setup
 
-#### Create Tables
 ```bash
-# Create all database tables
-python create_tables.py
+# Apply database migrations
+python migrate_database.py
 
-# Output:
-# 🗃️ Creating database tables...
-# ✅ Database tables created successfully!
-# 📋 Tables created:
-#   - projects
-#   - tasks
+# Verify setup
+python -c "from app.database_config import engine; print('✅ Database connected!')"
 ```
 
-#### Reset Database (Development Only)
+### Run the Server
+
 ```bash
-# Drop and recreate all tables
-python create_tables.py --drop
+# Start development server
+uvicorn app.api_server:app --reload --host 0.0.0.0 --port 8000
+
+# Server will be available at:
+# - API: http://localhost:8000
+# - Docs: http://localhost:8000/docs
+# - Redoc: http://localhost:8000/redoc
 ```
 
-### Schema Overview
+---
 
-#### Projects Table
+## 🏗️ Architecture
+
+### Clean & Modular Structure
+
+```
+gitguide_backend/
+├── app/                              # FastAPI Application
+│   ├── api_server.py                # FastAPI app server & route configuration
+│   ├── database_models.py           # SQLAlchemy database schema definitions
+│   ├── database_config.py           # Database connection configuration
+│   └── routes/                      # API Endpoints (organized by purpose)
+│       ├── health_endpoints.py     # Health check endpoints (/ping)
+│       ├── project_endpoints.py    # Project CRUD API endpoints
+│       ├── task_endpoints.py       # Task management API endpoints
+│       ├── chat_endpoints.py       # AI chat assistant API endpoints
+│       ├── auth/                    # Authentication Module
+│       │   ├── __init__.py
+│       │   └── auth_utilities.py   # JWT token processing & Clerk integration
+│       ├── agent/                   # AI Agent Endpoints
+│       │   ├── __init__.py
+│       │   ├── core_endpoints.py   # Core agent endpoints (process, status, health)
+│       │   ├── regeneration_endpoints.py # Learning path regeneration endpoints
+│       │   └── agent_utilities.py  # Agent database operations & helpers
+│       └── shared/                  # Shared Utilities
+│           ├── __init__.py
+│           ├── logging_and_paths.py # Logging configuration & path setup
+│           └── database_utilities.py # Database session patterns & utilities
+├── agent/                           # AI Agent System
+│   ├── __init__.py
+│   ├── agent_orchestrator.py       # Main agent orchestrator & processing logic
+│   ├── repository_analyzer.py      # GitHub API integration & repo analysis
+│   ├── learning_path_generator.py  # Groq LLM integration & content generation
+│   └── api_client.py               # Backend database integration
+├── prompts/                         # LLM Prompt Templates
+│   ├── __init__.py
+│   ├── learning_path_prompts.py    # Learning path generation prompts
+│   └── chat_prompts.py             # Chat assistant prompts
+├── migrate_database.py             # Database migration & schema management
+├── requirements.txt                # Python dependencies
+└── README.md                       # This comprehensive documentation
+```
+
+### Naming Convention Benefits
+
+- **Crystal Clear Purposes**: Every file name immediately tells you its function
+- **Zero Name Conflicts**: No duplicate file names across the entire codebase
+- **Intuitive Navigation**: `*_endpoints.py` for APIs, `*_utilities.py` for helpers, `*_config.py` for configuration
+- **Easy Maintenance**: Find functionality by logical file names with clear separation of concerns
+
+---
+
+## 📊 Complete API Reference
+
+### 🏥 Health & System
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Welcome message with API information |
+| `GET` | `/ping` | Health check endpoint |
+| `GET` | `/agent/health` | AI Agent service health check |
+| `GET` | `/chat/health` | Chat service health check |
+
+### 📂 Project Management
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/projects` | Create new learning project from GitHub repo | ✅ |
+| `GET` | `/projects` | Get user's projects with metadata | ✅ |
+| `GET` | `/projects/{project_id}` | Get specific project details | ✅ |
+| `DELETE` | `/projects/{project_id}` | Delete project (cascade deletes all content) | ✅ |
+| `GET` | `/projects/{project_id}/concepts` | Get AI-generated learning path | ✅ |
+
+### ✅ Task Management  
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/tasks` | Create new learning task | ✅ |
+| `GET` | `/projects/{project_id}/tasks` | Get all tasks for project (ordered) | ✅ |
+| `PUT` | `/tasks/{task_id}` | Update task (title, description, status, order) | ✅ |
+| `DELETE` | `/tasks/{task_id}` | Delete specific task | ✅ |
+
+### 🤖 AI Agent
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/agent/process` | Trigger AI learning path generation | ✅ |
+| `GET` | `/agent/status/{project_id}` | Check processing status | ✅ |
+
+### 🔄 AI Regeneration
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/agent/regenerate/project-overview` | Regenerate project overview with custom prompt | ✅ |
+| `POST` | `/agent/regenerate/whole-path` | Regenerate entire learning path | ✅ |
+| `POST` | `/agent/regenerate/concept` | Regenerate specific concept | ✅ |
+| `POST` | `/agent/regenerate/subtopic` | Regenerate specific subtopic | ✅ |
+| `POST` | `/agent/regenerate/task` | Regenerate specific task | ✅ |
+
+### 💬 AI Chat Assistant
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/chat/project/{project_id}` | Chat with context-aware AI tutor | ✅ |
+| `GET` | `/chat/project/{project_id}/context` | Get available chat context | ✅ |
+
+### 👤 User Management
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `GET` | `/users/{user_id}` | Get user details from Clerk | ✅ |
+
+---
+
+## 🗃️ Database Schema
+
+### Core Tables
+
+#### Projects
 ```python
 class Project(Base):
-    __tablename__ = "projects"
-    
-    project_id = Column(BigInteger, primary_key=True, index=True)
-    user_id = Column(String, nullable=False)
-    repo_url = Column(String, nullable=False)
-    skill_level = Column(String, nullable=False)  # Beginner, Intermediate, Pro
-    domain = Column(String, nullable=False)       # Full Stack, ML, etc.
-    
-    # Relationship to tasks
-    tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
+    project_id = Column(Integer, primary_key=True)
+    user_id = Column(String, nullable=False)           # Clerk user ID
+    repo_url = Column(String, nullable=False)          # GitHub repository URL
+    skill_level = Column(String, nullable=False)       # Beginner/Intermediate/Pro
+    domain = Column(String, nullable=False)            # Full Stack/ML/etc.
+    project_overview = Column(Text, nullable=True)     # AI-generated overview
+    repo_name = Column(String, nullable=True)          # Repository name
+    tech_stack = Column(Text, nullable=True)           # JSON: detected technologies
+    is_processed = Column(Boolean, default=False)      # Agent processing status
 ```
 
-#### Tasks Table
+#### Concepts (Learning Path Structure)
+```python
+class Concept(Base):
+    concept_id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.project_id"))
+    concept_external_id = Column(String, nullable=False)  # e.g., "concept-0"
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    order = Column(Integer, nullable=False)
+    is_unlocked = Column(Boolean, default=False)
+```
+
+#### Subtopics
+```python
+class Subtopic(Base):
+    subtopic_id = Column(Integer, primary_key=True)
+    concept_id = Column(Integer, ForeignKey("concepts.concept_id"))
+    subtopic_external_id = Column(String, nullable=False)  # e.g., "subtopic-0-0"
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    order = Column(Integer, nullable=False)
+    is_unlocked = Column(Boolean, default=False)
+```
+
+#### Tasks
 ```python
 class Task(Base):
-    __tablename__ = "tasks"
-    
-    task_id = Column(BigInteger, primary_key=True, index=True)
-    project_id = Column(BigInteger, ForeignKey("projects.project_id"), nullable=False)
+    task_id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.project_id"))
+    subtopic_id = Column(Integer, ForeignKey("subtopics.subtopic_id"))
+    task_external_id = Column(String, nullable=True)    # e.g., "task-0-0-0"
     title = Column(String, nullable=False)
-    description = Column(String, nullable=True)
-    status = Column(Enum(TaskStatus), default=TaskStatus.not_started, nullable=False)
-    order = Column(Integer, nullable=False)  # For sequential display
-    
-    # Relationship back to project
-    project = relationship("Project", back_populates="tasks")
+    description = Column(Text, nullable=True)
+    status = Column(Enum(TaskStatus), default=TaskStatus.not_started)
+    order = Column(Integer, nullable=False)
+    difficulty = Column(String, nullable=True)           # easy/medium/hard
+    files_to_study = Column(Text, nullable=True)         # JSON: array of file paths
+    is_unlocked = Column(Boolean, default=False)
 ```
 
-#### Task Status Enum
+### Task Status Flow
 ```python
 class TaskStatus(enum.Enum):
     not_started = "not_started"
@@ -85,145 +269,311 @@ class TaskStatus(enum.Enum):
     done = "done"
 ```
 
-## 🚀 Running the Application
+### Database Management
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Apply migrations
+python migrate_database.py
 
-# Setup database
-python create_tables.py
-
-# Start development server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Reset database (development only)
+python migrate_database.py --rollback
+# You'll be prompted to type 'CONFIRM'
 ```
 
-## 🏗️ Architecture
+---
 
-### Directory Structure
+## 🤖 AI Agent System
+
+### How It Works
+
+1. **Repository Analysis** (`repository_analyzer.py`)
+   - Fetches GitHub repository structure via GitHub API
+   - Extracts key files (README, package.json, requirements.txt, etc.)
+   - Analyzes technology stack and project structure
+   - Filters relevant files and content
+
+2. **Learning Path Generation** (`learning_path_generator.py`)
+   - Prepares repository context for LLM consumption
+   - Uses Groq LLM with specialized prompts
+   - Generates hierarchical learning structure: Project Overview → Concepts → Subtopics → Tasks
+   - Applies progressive unlocking logic
+
+3. **Content Storage** (`agent_orchestrator.py`)
+   - Saves generated content to PostgreSQL database
+   - Maintains relationships between concepts, subtopics, and tasks
+   - Updates project processing status
+
+### AI Models & Performance
+
+- **Model**: `llama3-70b-8192` (Groq)
+- **Learning Path Generation**: 4000 max tokens, 10-60 seconds
+- **Chat Responses**: 1000 max tokens, 1-3 seconds
+- **Repository Support**: Up to 200+ files per repository
+- **Cost Optimization**: Intelligent prompt design minimizes API usage
+
+### Regeneration System
+
+The regeneration system allows users to customize any part of their learning path:
+
+- **Project Overview**: Regenerate with custom focus or style
+- **Whole Learning Path**: Complete restructuring with user guidance
+- **Individual Concepts**: Targeted improvements to specific learning areas
+- **Subtopics & Tasks**: Fine-grained customization of learning components
+
+---
+
+## 🔐 Authentication & Security
+
+### Clerk Integration
+
+Authentication is handled via [Clerk](https://clerk.dev) with JWT tokens:
+
+1. **Frontend**: User authenticates with Clerk
+2. **Token**: Clerk issues JWT token to client
+3. **Backend**: Extracts user ID from JWT for all authenticated endpoints
+4. **Authorization**: Users can only access their own projects and data
+
+### Security Features
+
+- **User Isolation**: Strict user-project ownership verification
+- **Input Validation**: Pydantic models validate all API inputs
+- **SQL Injection Protection**: SQLAlchemy ORM with parameterized queries
+- **CORS Configuration**: Configurable cross-origin resource sharing
+- **Error Handling**: Sanitized error responses (no sensitive data leakage)
+
+### Authentication Flow
+
+```python
+# Extract user from JWT token
+user_id = extract_user_id_from_token(authorization_header)
+
+# Verify project ownership
+project = await verify_project_ownership(project_id, user_id, session)
+
+# Proceed with authorized operation
 ```
-gitguide_backend/
-├── app/                     # Main FastAPI application
-│   ├── routes/             # API endpoints
-│   │   ├── agent.py       # Agent processing endpoints
-│   │   ├── chat.py        # AI chat assistant
-│   │   ├── projects.py    # Project management
-│   │   └── tasks.py       # Task management
-│   ├── models.py          # Database models
-│   ├── db.py             # Database connection
-│   └── main.py           # FastAPI app initialization
-├── agent/                  # AI agent system
-│   ├── main.py           # Agent orchestrator
-│   ├── repository_analyzer.py  # GitHub API integration
-│   ├── learning_path_generator.py  # LLM integration
-│   └── api_client.py     # Database integration
-├── prompts/               # LLM prompt templates
-│   ├── learning_path_prompts.py  # Learning path generation
-│   ├── chat_prompts.py   # Chat assistant prompts
-│   └── README.md         # Prompt documentation
-└── migrate_database.py   # Database migration script
+
+---
+
+## 🛠️ Development Workflow
+
+### Code Organization
+
+- **Modular Design**: Each file has a single, clear responsibility
+- **Shared Utilities**: Common patterns extracted into shared modules
+- **Type Safety**: Pydantic models for API validation
+- **Async/Await**: Full async support for database and external API calls
+
+### Development Commands
+
+```bash
+# Start development server with auto-reload
+uvicorn app.api_server:app --reload --host 0.0.0.0 --port 8000
+
+# Test database models
+python -c "from app.database_models import Base; print('✅ Models import successfully')"
+
+# Test agent system
+python -c "from agent.agent_orchestrator import GitGuideAgent; print('✅ Agent imports successfully')"
+
+# Check API endpoints
+curl http://localhost:8000/ping
+curl http://localhost:8000/agent/health
+curl http://localhost:8000/chat/health
 ```
 
-### Technology Stack
-- **FastAPI**: Modern async web framework
-- **SQLAlchemy**: Async ORM for database operations
-- **PostgreSQL**: Production-ready relational database
-- **Pydantic**: Data validation and serialization
-- **Clerk**: Authentication and user management
-- **Groq LLM**: AI-powered learning path generation and chat
-- **GitHub API**: Repository analysis and content extraction
+### Testing & Debugging
 
-## 📊 API Endpoints
+```bash
+# View API documentation
+open http://localhost:8000/docs
 
-### Projects
-- `POST /projects` - Create a new learning project
-- `GET /projects` - Get user's projects with user details
-- `GET /projects/{project_id}` - Get a specific project by ID
-- `DELETE /projects/{project_id}` - Delete a project (cascade deletes all tasks)
+# Test agent processing
+python agent/agent_orchestrator.py
 
-### Tasks
-- `POST /tasks` - Create a new task for a project
-- `GET /projects/{project_id}/tasks` - Get all tasks for a project (ordered sequentially)
-- `PUT /tasks/{task_id}` - Update a task (title, description, status, order)
-- `DELETE /tasks/{task_id}` - Delete a task
+# Database queries
+python migrate_database.py
+```
 
-### Users
-- `GET /users/{user_id}` - Get user details by Clerk user ID
+---
 
-### AI Agent & Chat
-- `POST /agent/process` - Trigger AI learning path generation for a project
-- `GET /agent/status/{project_id}` - Check processing status
-- `GET /agent/health` - Agent service health check
-- `POST /chat/project/{project_id}` - Context-aware chat with AI tutor
-- `GET /chat/project/{project_id}/context` - Get available chat context
-- `GET /chat/health` - Chat service health check
-
-### System
-- `GET /ping` - Health check endpoint
-
-## 🔐 Authentication
-
-Authentication is handled via Clerk. All project and task endpoints require valid user authentication tokens passed in the `Authorization` header.
-
-## 📝 Project & Task Management Features
-
-### Project Management
-- **Full CRUD Operations**: Create, read, update, delete projects
-- **User Isolation**: Users can only access their own projects
-- **Repository Integration**: Links to GitHub repositories
-- **Skill Level Tracking**: Beginner, Intermediate, Pro levels
-- **Domain Classification**: Full Stack, ML, Data Science, Mobile App, etc.
-- **Cascade Deletion**: Deleting a project removes all associated tasks
-
-### Task Management
-- **Sequential Learning**: Tasks are ordered for step-by-step learning
-- **Progress Tracking**: Status tracking (not_started → in_progress → done)
-- **Project-Linked**: Tasks belong to specific projects
-- **User Security**: Users can only access their own project tasks
-- **Flexible Ordering**: Tasks can be reordered for optimal learning flow
-
-## 🔄 Data Types & Constraints
-
-- **BigInteger IDs**: Supports large ID values for scalability
-- **Enum Status**: Strict task status validation
-- **Foreign Key Constraints**: Ensures data integrity
-- **Cascade Operations**: Automatic cleanup of related data 
-
-## 🤖 AI Features & Prompts
-
-### Learning Path Generation
-The GitGuide Agent automatically analyzes GitHub repositories and creates structured learning paths using advanced LLM technology.
-
-**Process Flow:**
-1. **Repository Analysis**: Scans GitHub repo structure and extracts key files
-2. **Content Generation**: Uses Groq LLM to create personalized learning content
-3. **Database Storage**: Saves hierarchical learning structure (Concepts → Subtopics → Tasks)
-
-### Context-Aware Chat Assistant
-An AI tutor that provides personalized guidance based on the specific repository and learning progress.
-
-**Features:**
-- Full repository context awareness
-- Current task and progress tracking
-- Skill-level adaptive responses
-- Real-time code explanations
-
-### Prompt Engineering
-All LLM prompts are centralized in the `prompts/` directory for easy maintenance and optimization:
-
-- **Learning Path Prompts**: Repository analysis and learning structure generation
-- **Chat Prompts**: Context-aware tutoring and code assistance
-- **Modular Design**: Easy to extend with new prompt types
+## 🌐 Deployment
 
 ### Environment Variables
+
+Production environment requires:
+
 ```env
-# Required for AI features
-GROQ_API_KEY=gsk_your_groq_api_key_here
-GITHUB_ACCESS_TOKEN=ghp_your_github_token_here
+# Database (Required)
+DATABASE_URL=postgresql+asyncpg://user:pass@host:port/db
+
+# AI Services (Required)
+GROQ_API_KEY=gsk_...
+GITHUB_ACCESS_TOKEN=ghp_...
+
+# Authentication (Required)
+CLERK_SECRET_KEY=sk_...
+
+# Optional: Production settings
+DEBUG=False
+LOG_LEVEL=WARNING
+CORS_ORIGINS=["https://yourdomain.com"]
 ```
 
-### Performance
-- **Learning Path Generation**: 10-60 seconds per repository
-- **Chat Responses**: 1-3 seconds per message
-- **Repository Analysis**: Supports repos up to 200+ files
-- **Cost Efficient**: Optimized prompts minimize API usage 
+### Production Deployment
+
+```bash
+# Install production dependencies
+pip install -r requirements.txt
+
+# Apply database migrations
+python migrate_database.py
+
+# Start production server
+uvicorn app.api_server:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### Docker Support
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+CMD ["uvicorn", "app.api_server:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+---
+
+## 📋 API Usage Examples
+
+### Create and Process Project
+
+```python
+import httpx
+
+# 1. Create project
+response = httpx.post("http://localhost:8000/projects", 
+    json={
+        "repo_url": "https://github.com/user/repo",
+        "skill_level": "Intermediate", 
+        "domain": "Full Stack"
+    },
+    headers={"Authorization": "Bearer YOUR_JWT_TOKEN"}
+)
+project = response.json()
+
+# 2. Trigger AI processing
+httpx.post("http://localhost:8000/agent/process",
+    json={"project_id": project["project_id"]},
+    headers={"Authorization": "Bearer YOUR_JWT_TOKEN"}
+)
+
+# 3. Check status
+status = httpx.get(f"http://localhost:8000/agent/status/{project['project_id']}",
+    headers={"Authorization": "Bearer YOUR_JWT_TOKEN"}
+)
+
+# 4. Get learning path
+concepts = httpx.get(f"http://localhost:8000/projects/{project['project_id']}/concepts",
+    headers={"Authorization": "Bearer YOUR_JWT_TOKEN"}
+)
+```
+
+### Chat with AI Assistant
+
+```python
+# Send message to AI tutor
+response = httpx.post(f"http://localhost:8000/chat/project/{project_id}",
+    json={"message": "How do I implement user authentication in this project?"},
+    headers={"Authorization": "Bearer YOUR_JWT_TOKEN"}
+)
+ai_response = response.json()["response"]
+```
+
+### Regenerate Content
+
+```python
+# Regenerate project overview with custom prompt
+httpx.post("http://localhost:8000/agent/regenerate/project-overview",
+    json={
+        "project_id": project_id,
+        "user_prompt": "Focus more on advanced patterns and best practices"
+    },
+    headers={"Authorization": "Bearer YOUR_JWT_TOKEN"}
+)
+```
+
+---
+
+## 🔧 Configuration
+
+### Logging
+
+Logging is configured in `app/routes/shared/logging_and_paths.py`:
+
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+```
+
+### Database Connection
+
+Database configuration in `app/database_config.py`:
+
+```python
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+engine = create_async_engine(DATABASE_URL, echo=True)
+SessionLocal = sessionmaker(bind=engine, class_=AsyncSession)
+```
+
+### CORS Configuration
+
+CORS settings in `app/api_server.py`:
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+---
+
+## 🤝 Contributing
+
+1. Follow the established file naming conventions
+2. Each file should have a single, clear responsibility
+3. Use async/await for all database and external API operations
+4. Add proper error handling and logging
+5. Update this README for any new features or changes
+
+---
+
+## 📄 License
+
+MIT License - See LICENSE file for details
+
+---
+
+## 🆘 Support
+
+For issues and questions:
+1. Check the API documentation at `/docs`
+2. Review the health endpoints for service status
+3. Check logs for detailed error information
+4. Ensure all environment variables are properly configured
+
+**Made with ❤️ for developers who want to learn from real-world codebases** 

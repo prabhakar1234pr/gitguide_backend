@@ -14,6 +14,7 @@ class GitGuideAgent:
         self.github_token = os.getenv('GITHUB_ACCESS_TOKEN')
         self.groq_api_key = os.getenv('GROQ_API_KEY')
         self.backend_url = "http://localhost:8000"
+        print(f"🚀 GitGuideAgent initialized: Groq API key present: {bool(self.groq_api_key)}")
         
     async def process_new_project(self, project_id, repo_url, skill_level, domain, user_id):
         """
@@ -29,30 +30,32 @@ class GitGuideAgent:
         Returns:
             dict: Processing result
         """
+        print(f"🎯 Starting processing for project {project_id}: {repo_url}")
+        print(f"   Skill Level: {skill_level}, Domain: {domain}")
+        
         try:
-            print(f"🚀 Processing project {project_id}")
-            print(f"📦 Repository: {repo_url}")
-            print(f"👤 User: {user_id} | Skill: {skill_level} | Domain: {domain}")
-            
             # Step 1: Analyze repository
-            print("\n📊 Step 1: Analyzing repository...")
+            print("🔍 Step 1: Analyzing repository...")
             repo_analysis = await analyze_repository(repo_url, self.github_token)
+            print(f"   Analysis complete: success={repo_analysis['success']}")
             
             if not repo_analysis['success']:
+                error_msg = f"Repository analysis failed: {repo_analysis['error']}"
+                print(f"❌ {error_msg}")
                 return {
-                    'success': False, 
-                    'error': f"Repository analysis failed: {repo_analysis['error']}"
+                    'success': False,
+                    'error': error_msg
                 }
             
-            print(f"✅ Repository analyzed: {len(repo_analysis['files'])} files found")
+            print(f"✅ Repository analyzed: {repo_analysis['total_files']} files, {len(repo_analysis['tech_stack'])} technologies")
             
             # Step 2: Generate learning path
-            print("\n🎯 Step 2: Generating learning path...")
+            print("🧠 Step 2: Generating personalized learning path...")
             learning_path = await generate_learning_path(
-                repo_analysis=repo_analysis,
-                skill_level=skill_level,
-                domain=domain,
-                groq_api_key=self.groq_api_key
+                repo_analysis, 
+                skill_level, 
+                domain, 
+                self.groq_api_key
             )
             
             if not learning_path['success']:
@@ -61,61 +64,69 @@ class GitGuideAgent:
                     'error': f"Learning path generation failed: {learning_path['error']}"
                 }
             
-            print(f"✅ Learning path generated:")
-            print(f"   📚 Concepts: {len(learning_path['concepts'])}")
-            print(f"   📖 Total subtopics: {sum(len(c['subtopics']) for c in learning_path['concepts'])}")
-            print(f"   ✏️ Total tasks: {sum(sum(len(st['tasks']) for st in c['subtopics']) for c in learning_path['concepts'])}")
+            print(f"🎯 Learning path generated with {len(learning_path['concepts'])} concepts")
             
             # Step 3: Save to database
-            print("\n💾 Step 3: Saving to database...")
+            print("💾 Step 3: Saving learning content to database...")
             save_result = await save_learning_content(
-                project_id=project_id,
-                learning_path=learning_path,
-                backend_url=self.backend_url,
-                user_id=user_id
+                project_id,
+                learning_path,
+                repo_analysis['repo_info']
             )
             
             if not save_result['success']:
                 return {
                     'success': False,
-                    'error': f"Database save failed: {save_result['error']}"
+                    'error': f"Failed to save learning content: {save_result['error']}"
                 }
             
-            print("✅ Learning content saved to database")
-            print(f"🎉 Project {project_id} processing completed successfully!")
-            
+            print(f"✅ GitGuide Agent completed successfully for project {project_id}")
             return {
                 'success': True,
                 'project_id': project_id,
-                'concepts_count': len(learning_path['concepts']),
-                'project_overview': learning_path['project_overview']
+                'concepts_generated': len(learning_path['concepts']),
+                'repo_info': repo_analysis['repo_info']
             }
             
         except Exception as e:
-            print(f"❌ Agent processing failed: {str(e)}")
+            error_msg = f"Agent processing failed for project {project_id}: {str(e)}"
+            print(f"❌ {error_msg}")
             return {
                 'success': False,
-                'error': f"Agent processing failed: {str(e)}"
+                'error': error_msg
             }
 
-# Convenience function for direct calls
+
+# Main processing function (for backward compatibility)
 async def process_project(project_id, repo_url, skill_level, domain, user_id):
-    """Convenience function to process a project"""
+    """Process a project using GitGuide Agent"""
     agent = GitGuideAgent()
     return await agent.process_new_project(project_id, repo_url, skill_level, domain, user_id)
 
-# Test function
+
+# Test function for development
 async def test_agent():
     """Test the agent with a sample repository"""
-    result = await process_project(
+    agent = GitGuideAgent()
+    
+    # Test with a simple public repository
+    test_result = await agent.process_new_project(
         project_id=999,
-        repo_url="https://github.com/vercel/next.js",
-        skill_level="Intermediate",
+        repo_url="https://github.com/octocat/Hello-World",
+        skill_level="Beginner",
         domain="Full Stack",
-        user_id="test_user_123"
+        user_id="test_user"
     )
-    print(f"\n🧪 Test Result: {result}")
+    
+    print("🧪 Agent Test Result:")
+    print(f"Success: {test_result['success']}")
+    if test_result['success']:
+        print(f"Concepts: {test_result['concepts_generated']}")
+        print(f"Repository: {test_result['repo_info']['name']}")
+    else:
+        print(f"Error: {test_result['error']}")
+
 
 if __name__ == "__main__":
-    print("🤖 GitGuide Agent Starting...")
+    print("🧪 Testing GitGuide Agent...")
     asyncio.run(test_agent()) 

@@ -67,7 +67,10 @@ IMPORTANT REQUIREMENTS:
 - Make tasks practical and actionable
 - Ensure progressive difficulty within each concept
 
-RESPONSE FORMAT (JSON):
+CRITICAL: You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text.
+Your response must start with {{ and end with }}. Nothing else.
+
+RESPONSE FORMAT (JSON ONLY):
 {{
     "project_overview": "Detailed overview explaining the project, its purpose, architecture, and what the learner will gain by studying it...",
     "concepts": [
@@ -95,7 +98,7 @@ RESPONSE FORMAT (JSON):
     ]
 }}
 
-Generate EXACTLY this JSON structure with real, specific content based on the repository analysis.
+RESPOND WITH ONLY THE JSON STRUCTURE ABOVE. NO OTHER TEXT OR EXPLANATIONS.
 """
     
     return prompt

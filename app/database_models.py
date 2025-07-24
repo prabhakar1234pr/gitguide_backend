@@ -1,12 +1,14 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Enum, Text, Boolean
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, Enum, UniqueConstraint
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from app.db import Base
-import enum
+from enum import Enum as PyEnum
 
-class TaskStatus(enum.Enum):
+Base = declarative_base()
+
+class TaskStatus(PyEnum):
     not_started = "not_started"
     in_progress = "in_progress"
-    done = "done"
+    completed = "completed"
 
 class Project(Base):
     __tablename__ = "projects"
@@ -23,19 +25,24 @@ class Project(Base):
     tech_stack = Column(Text, nullable=True)  # JSON string of detected technologies
     is_processed = Column(Boolean, default=False, nullable=False)  # Whether agent has processed
     
+    # Add unique constraint to prevent duplicate projects for same user and repo
+    __table_args__ = (
+        UniqueConstraint('user_id', 'repo_url', name='unique_user_repo'),
+    )
+    
     # Relationships
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
     concepts = relationship("Concept", back_populates="project", cascade="all, delete-orphan")
 
 class Concept(Base):
     __tablename__ = "concepts"
-
+    
     concept_id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.project_id"), nullable=False)
     concept_external_id = Column(String, nullable=False)  # e.g., "concept-0"
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    order = Column(Integer, nullable=False)  # For display order
+    order = Column(Integer, nullable=False)
     is_unlocked = Column(Boolean, default=False, nullable=False)
     
     # Relationships
@@ -44,13 +51,13 @@ class Concept(Base):
 
 class Subtopic(Base):
     __tablename__ = "subtopics"
-
+    
     subtopic_id = Column(Integer, primary_key=True, index=True)
     concept_id = Column(Integer, ForeignKey("concepts.concept_id"), nullable=False)
     subtopic_external_id = Column(String, nullable=False)  # e.g., "subtopic-0-0"
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    order = Column(Integer, nullable=False)  # For display order
+    order = Column(Integer, nullable=False)
     is_unlocked = Column(Boolean, default=False, nullable=False)
     
     # Relationships
@@ -74,4 +81,4 @@ class Task(Base):
     
     # Relationships
     project = relationship("Project", back_populates="tasks")
-    subtopic = relationship("Subtopic", back_populates="tasks")
+    subtopic = relationship("Subtopic", back_populates="tasks") 

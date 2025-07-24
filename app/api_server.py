@@ -1,5 +1,7 @@
 from fastapi import FastAPI
-from app.routes import ping, projects, tasks, agent, chat
+from app.routes import health_endpoints, project_endpoints, task_endpoints, chat_endpoints
+from app.routes.agent.core_endpoints import router as core_endpoints_router
+from app.routes.agent.regeneration_endpoints import router as regeneration_endpoints_router
 from fastapi.middleware.cors import CORSMiddleware
 
 # FastAPI app with enhanced metadata for better Swagger documentation
@@ -42,11 +44,12 @@ app.add_middleware(
 )
 
 # Include routers with organized structure
-app.include_router(ping.router, tags=["🏥 Health"])
-app.include_router(projects.router, tags=["📂 Projects"])
-app.include_router(tasks.router, tags=["✅ Tasks"])
-app.include_router(agent.router, tags=["🤖 AI Agent"])
-app.include_router(chat.router, tags=["💬 Chat Assistant"])
+app.include_router(health_endpoints.router, tags=["🏥 Health"])
+app.include_router(project_endpoints.router, tags=["📂 Projects"])
+app.include_router(task_endpoints.router, tags=["✅ Tasks"])
+app.include_router(core_endpoints_router, tags=["🤖 AI Agent - Core"])
+app.include_router(regeneration_endpoints_router, tags=["🔄 AI Agent - Regeneration"])
+app.include_router(chat_endpoints.router, tags=["💬 Chat Assistant"])
 
 @app.get("/", 
     tags=["🏠 Welcome"],
@@ -61,4 +64,4 @@ def root():
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/ping"
-    }
+    } 

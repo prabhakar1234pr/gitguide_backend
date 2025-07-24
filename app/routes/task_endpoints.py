@@ -3,9 +3,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
-from app.models import Task, Project, TaskStatus
-from app.db import SessionLocal
-from app.routes.projects import extract_user_id_from_token
+from app.database_models import Task, Project, TaskStatus
+from app.database_config import SessionLocal
+from app.routes.auth.auth_utilities import extract_user_id_from_token
 
 router = APIRouter()
 

@@ -5,8 +5,8 @@ Run this script to migrate existing database to new schema
 
 import asyncio
 from sqlalchemy import text
-from app.db import engine, SessionLocal
-from app.models import Base
+from app.database_config import engine, SessionLocal
+from app.database_models import Base
 
 async def migrate_database():
     """Migrate database to new schema"""

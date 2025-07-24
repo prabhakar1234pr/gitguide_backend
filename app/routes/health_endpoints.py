@@ -8,4 +8,4 @@ router = APIRouter()
     response_description="Confirmation that server is alive"
 )
 async def ping():
-    return {"message": "pong"}
+    return {"message": "pong"} 

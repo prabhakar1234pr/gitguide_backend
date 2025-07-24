@@ -2,23 +2,16 @@ from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-import jwt
 import json
 import os
-import sys
-import logging
 
-from app.models import Project, Concept, Subtopic, Task
-from app.db import SessionLocal
+from app.database_models import Project, Concept, Subtopic, Task
+from app.database_config import SessionLocal
+from app.routes.auth.auth_utilities import extract_user_id_from_token
+from app.routes.shared.logging_and_paths import get_logger
+from app.routes.shared.database_utilities import get_db_session, verify_project_ownership
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Add agent directory to path for LLM access
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../agent'))
-# Add prompts directory to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../prompts'))
+logger = get_logger(__name__)
 
 try:
     from groq import Groq
@@ -37,24 +30,6 @@ class ChatResponse(BaseModel):
     response: str
     context_used: dict
 
-def extract_user_id_from_token(authorization: str = None) -> str:
-    """Extract Clerk user ID from JWT token"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authorization token required")
-    
-    token = authorization.replace("Bearer ", "")
-    
-    try:
-        decoded = jwt.decode(token, options={"verify_signature": False})
-        user_id = decoded.get("sub")
-        
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token: no user ID found")
-            
-        return user_id
-        
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid JWT token")
 
 async def get_project_full_context(project_id: int, user_id: str):
     """Get complete project context including repository files and learning path"""

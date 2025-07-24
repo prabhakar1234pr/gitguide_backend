@@ -2,18 +2,15 @@ from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-import jwt
 import json
-import httpx
-import os
-import logging
 
-from app.models import Project, Concept, Subtopic, Task
-from app.db import SessionLocal
+from app.database_models import Project, Concept, Subtopic, Task
+from app.database_config import SessionLocal
+from app.routes.auth.auth_utilities import extract_user_id_from_token, get_user_details_from_clerk
+from app.routes.shared.logging_and_paths import get_logger
+from app.routes.shared.database_utilities import get_db_session, verify_project_ownership
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -22,55 +19,6 @@ class ProjectCreateRequest(BaseModel):
     skill_level: str
     domain: str
 
-def extract_user_id_from_token(authorization: str = None) -> str:
-    """Extract Clerk user ID from JWT token"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authorization token required")
-    
-    token = authorization.replace("Bearer ", "")
-    
-    try:
-        # Decode JWT without verification for now (in production, verify with Clerk's public key)
-        # This extracts the user ID from Clerk's JWT payload
-        decoded = jwt.decode(token, options={"verify_signature": False})
-        user_id = decoded.get("sub")  # 'sub' contains the Clerk user ID
-        
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token: no user ID found")
-            
-        return user_id
-        
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid JWT token")
-
-async def get_user_details_from_clerk(user_id: str):
-    """Fetch user details from Clerk API"""
-    try:
-        clerk_secret_key = os.getenv("CLERK_SECRET_KEY")
-        if not clerk_secret_key:
-            return {"name": "Unknown User", "email": "unknown@example.com"}
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.clerk.com/v1/users/{user_id}",
-                headers={
-                    "Authorization": f"Bearer {clerk_secret_key}",
-                    "Content-Type": "application/json"
-                }
-            )
-            
-            if response.status_code == 200:
-                user_data = response.json()
-                return {
-                    "name": f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip(),
-                    "email": user_data.get('email_addresses', [{}])[0].get('email_address', 'unknown@example.com')
-                }
-            else:
-                return {"name": "Unknown User", "email": "unknown@example.com"}
-                
-    except Exception as e:
-        print(f"Error fetching user details: {e}")
-        return {"name": "Unknown User", "email": "unknown@example.com"}
 
 @router.post("/projects", 
     summary="Create New Project",
@@ -93,6 +41,24 @@ async def create_project(
     # Create database session and save project
     async with SessionLocal() as session:
         try:
+            # Check if project already exists for this user and repo URL
+            existing_project_result = await session.execute(
+                select(Project).filter(
+                    Project.user_id == user_id,
+                    Project.repo_url == data.repo_url
+                )
+            )
+            existing_project = existing_project_result.scalar_one_or_none()
+            
+            if existing_project:
+                print(f"⚠️ Project already exists with ID: {existing_project.project_id}")
+                return {
+                    "message": "Project already exists for this repository",
+                    "project_id": existing_project.project_id,
+                    "user_id": existing_project.user_id,
+                    "existing": True
+                }
+            
             # Create new project instance with real Clerk user_id
             new_project = Project(
                 user_id=user_id,
@@ -110,7 +76,8 @@ async def create_project(
             return {
                 "message": "Project saved successfully to database",
                 "project_id": new_project.project_id,
-                "user_id": new_project.user_id
+                "user_id": new_project.user_id,
+                "existing": False
             }
             
         except Exception as e:
@@ -367,4 +334,4 @@ async def get_user_by_id(user_id: str):
             "email": user_details["email"]
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get user details: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get user details: {str(e)}") 
