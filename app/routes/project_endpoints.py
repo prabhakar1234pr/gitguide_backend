@@ -271,7 +271,15 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                 )
                 subtopics = subtopics_result.scalars().all()
                 
+                # Get tasks directly attached to this concept (for Day 0)
+                direct_tasks_result = await session.execute(
+                    select(Task).filter(Task.concept_id == concept.concept_id, Task.subtopic_id.is_(None)).order_by(Task.order)
+                )
+                direct_tasks = direct_tasks_result.scalars().all()
+                
                 subtopics_data = []
+                
+                # Process regular subtopics (Days 1-14)
                 for subtopic in subtopics:
                     # Get tasks for this subtopic
                     tasks_result = await session.execute(
@@ -282,6 +290,7 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                     tasks_data = [
                         {
                             "id": task.task_external_id,
+                            "task_id": task.task_id,  # Add DB integer ID
                             "name": task.title,
                             "description": task.description,
                             "difficulty": task.difficulty,
@@ -300,9 +309,36 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                         "tasks": tasks_data
                     })
                 
+                # If there are direct tasks (Day 0), create a virtual subtopic for them
+                if direct_tasks:
+                    direct_tasks_data = [
+                        {
+                            "id": task.task_external_id,
+                            "task_id": task.task_id,  # Add DB integer ID
+                            "name": task.title,
+                            "description": task.description,
+                            "difficulty": "Beginner",  # Day 0 tasks are always beginner level
+                            "files_to_study": [],
+                            "isUnlocked": task.is_unlocked,
+                            "status": task.status.value,
+                            "verification_type": task.verification_type,
+                            "is_verified": task.is_verified
+                        }
+                        for task in direct_tasks
+                    ]
+                    
+                    # Create a virtual subtopic for Day 0 tasks
+                    subtopics_data.insert(0, {
+                        "id": f"day0-tasks-{concept.concept_external_id}",
+                        "name": "Setup Tasks",
+                        "description": "Complete these verification tasks to unlock the next day",
+                        "isUnlocked": True,  # Day 0 tasks are always unlocked
+                        "tasks": direct_tasks_data
+                    })
+                
                 concepts_data.append({
                     "id": concept.concept_external_id,
-                    "name": concept.name,
+                    "name": concept.title,
                     "description": concept.description,
                     "isUnlocked": concept.is_unlocked,
                     "subTopics": subtopics_data

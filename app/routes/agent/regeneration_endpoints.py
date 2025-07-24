@@ -204,7 +204,7 @@ async def regenerate_concept(
             # Convert concept to dict for processing
             concept_dict = {
                 "id": concept.concept_external_id,
-                "name": concept.name,
+                "name": concept.title,
                 "description": concept.description
             }
 
@@ -362,7 +362,7 @@ async def regenerate_subtopic(
 
         parent_concept = {
             "id": concept.concept_external_id,
-            "name": concept.name,
+            "name": concept.title,
             "description": concept.description
         }
 
@@ -489,7 +489,7 @@ async def regenerate_task(
 
         parent_concept = {
             "id": concept.concept_external_id,
-            "name": concept.name,
+            "name": concept.title,
             "description": concept.description
         }
 

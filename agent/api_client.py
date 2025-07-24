@@ -6,10 +6,15 @@ Handles communication with FastAPI backend
 import os
 import json
 import aiohttp
+import sys
 from typing import Dict, Any, Optional
 from sqlalchemy import select
 from app.database_models import Project, Concept, Subtopic, Task
 from app.database_config import SessionLocal
+
+# Import days utilities
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.routes.shared.days_utilities import create_15_days_for_project
 
 async def save_learning_content(project_id: int, learning_path: Dict[str, Any], repo_info: Dict[str, Any]) -> Dict[str, Any]:
     """Save learning content to database directly"""
@@ -31,6 +36,20 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
             project.project_overview = learning_path.get('project_overview', '')
             project.tech_stack = json.dumps(repo_info.get('tech_stack', []))
             project.is_processed = True
+            
+            # 🆕 CREATE DAY 0 + 14 LEARNING DAYS FOR NEW PROJECT
+            print(f"📅 Creating Day 0 + 14-day learning progression for project {project_id}")
+            try:
+                # Extract project name from repo URL
+                project_name = repo_info.get('repo_name') or project.repo_name
+                if not project_name and project.repo_url:
+                    project_name = project.repo_url.split('/')[-1].replace('.git', '')
+                
+                days_created = await create_15_days_for_project(session, project_id, project_name)
+                print(f"✅ Created {len(days_created)} days (Day 0 unlocked for verification, Days 1-14 locked)")
+            except Exception as days_error:
+                print(f"⚠️ Failed to create days (continuing with concepts): {str(days_error)}")
+                # Continue processing even if days creation fails
             
             # Save concepts
             concepts_data = learning_path.get('concepts', [])
@@ -128,6 +147,9 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
             
             await session.commit()
             print("✅ All learning content saved successfully")
+            print("🚀 New hierarchy: Project → Days (14) → Concepts → Subtopics → Tasks")
+            print("🔓 Day 1 is unlocked, Days 2-14 are locked and will unlock as you progress")
+            
             return {"success": True, "message": "Learning content saved successfully"}
             
         except Exception as e:

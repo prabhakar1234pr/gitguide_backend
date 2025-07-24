@@ -6,8 +6,17 @@ This ensures .env file takes precedence over Windows system environment variable
 import os
 from dotenv import load_dotenv
 
+# Global flag to track if environment has been loaded
+_env_loaded = False
+
 def force_load_env():
-    """Force load .env file and override system environment variables"""
+    """Force load .env file and override system environment variables (only runs once)"""
+    global _env_loaded
+    
+    # If already loaded, skip execution
+    if _env_loaded:
+        return
+    
     print("🔄 Force loading environment variables from .env file...")
     
     # Load .env file into a dictionary first
@@ -42,6 +51,9 @@ def force_load_env():
     
     # Also load normally for other variables
     load_dotenv(override=True)
+    
+    # Mark as loaded to prevent future executions
+    _env_loaded = True
     
     return env_vars
 

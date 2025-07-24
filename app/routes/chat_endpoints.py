@@ -73,7 +73,7 @@ async def get_project_full_context(project_id: int, user_id: str):
             
             concept_data = {
                 'id': concept.concept_external_id,
-                'name': concept.name,
+                'name': concept.title,
                 'description': concept.description,
                 'is_unlocked': concept.is_unlocked,
                 'subtopics': []
