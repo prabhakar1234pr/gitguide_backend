@@ -40,7 +40,7 @@ async def test_agent_processing():
     
     try:
         agent = GitGuideAgent()
-        print(f"✅ Agent initialized. API key present: {bool(agent.groq_api_key)}")
+        print(f"✅ Agent initialized. Azure OpenAI configured: {bool(agent.azure_openai_config['api_key'])}")
         
         # Test with a simple repository
         test_repo = "https://github.com/octocat/Hello-World"
@@ -68,7 +68,7 @@ async def test_agent_processing():
             repo_analysis, 
             "Intermediate", 
             "Full Stack", 
-            agent.groq_api_key
+            agent.azure_openai_config
         )
         
         if learning_path['success']:

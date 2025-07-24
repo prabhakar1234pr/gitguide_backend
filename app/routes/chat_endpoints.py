@@ -4,6 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
 import os
+import sys
+
+# Add path to import force_env_loader
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from force_env_loader import force_load_env
+
+# Force load correct environment variables from .env file
+force_load_env()
 
 from app.database_models import Project, Concept, Subtopic, Task
 from app.database_config import SessionLocal
@@ -14,12 +22,12 @@ from app.routes.shared.database_utilities import get_db_session, verify_project_
 logger = get_logger(__name__)
 
 try:
-    from groq import Groq
+    from openai import AzureOpenAI
     from agent.repository_analyzer import analyze_repository
     from prompts import create_chat_prompt
 except ImportError:
     print("⚠️ Chat dependencies not available")
-    Groq = None
+    AzureOpenAI = None
 
 router = APIRouter()
 
@@ -149,11 +157,11 @@ async def chat_with_project_context(
     """Chat with AI assistant that has full project context"""
     logger.info(f"💬 Chat request for project {project_id}: '{message.message[:50]}...'")
     
-    if not Groq:
-        logger.error("❌ Groq API not available")
+    if not AzureOpenAI:
+        logger.error("❌ Azure OpenAI not available")
         raise HTTPException(
             status_code=503,
-            detail="Chat service not available - Groq API not configured"
+            detail="Chat service not available - Azure OpenAI not configured"
         )
     
     try:
@@ -169,17 +177,25 @@ async def chat_with_project_context(
         prompt = create_chat_prompt(message.message, context)
         logger.info(f"📝 Prompt created: {len(prompt)} characters")
         
-        # Call Groq LLM
-        groq_api_key = os.getenv('GROQ_API_KEY')
-        if not groq_api_key:
-            logger.error("❌ Groq API key not configured")
-            raise HTTPException(status_code=503, detail="Groq API key not configured")
+        # Call Azure OpenAI
+        azure_openai_key = os.getenv('AZURE_OPENAI_KEY')
+        azure_openai_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+        azure_openai_version = os.getenv('AZURE_OPENAI_API_VERSION')
+        azure_openai_deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT_GPT_4_1')
         
-        logger.info(f"🤖 Calling Groq LLM...")
-        client = Groq(api_key=groq_api_key)
+        if not azure_openai_key or not azure_openai_endpoint:
+            logger.error("❌ Azure OpenAI configuration not complete")
+            raise HTTPException(status_code=503, detail="Azure OpenAI not configured")
+        
+        logger.info(f"🤖 Calling Azure OpenAI...")
+        client = AzureOpenAI(
+            api_key=azure_openai_key,
+            azure_endpoint=azure_openai_endpoint,
+            api_version=azure_openai_version
+        )
         
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model=azure_openai_deployment,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=1000
@@ -248,8 +264,9 @@ async def chat_health_check():
     """Check if chat service is available"""
     
     return {
-        "status": "available" if Groq else "unavailable",
-        "groq_available": bool(Groq),
-        "groq_api_key": bool(os.getenv('GROQ_API_KEY')),
+        "status": "available" if AzureOpenAI else "unavailable",
+        "azure_openai_available": bool(AzureOpenAI),
+        "azure_openai_key": bool(os.getenv('AZURE_OPENAI_KEY')),
+        "azure_openai_endpoint": bool(os.getenv('AZURE_OPENAI_ENDPOINT')),
         "github_token": bool(os.getenv('GITHUB_ACCESS_TOKEN'))
     } 

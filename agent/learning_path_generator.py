@@ -1,13 +1,13 @@
 import json
 import sys
 import os
-from groq import Groq
+from openai import AzureOpenAI
 
 # Add prompts directory to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from prompts import create_analysis_prompt, prepare_repository_context
 
-async def generate_learning_path(repo_analysis, skill_level, domain, groq_api_key):
+async def generate_learning_path(repo_analysis, skill_level, domain, azure_openai_config):
     """
     Generate a personalized learning path based on repository analysis
     
@@ -15,15 +15,17 @@ async def generate_learning_path(repo_analysis, skill_level, domain, groq_api_ke
         repo_analysis: Repository analysis data
         skill_level: User's skill level (Beginner, Intermediate, Pro)
         domain: Project domain (Full Stack, ML, etc.)
-        groq_api_key: Groq API key
+        azure_openai_config: Azure OpenAI configuration dict
     
     Returns:
         dict: Structured learning path with project overview, concepts, subtopics, and tasks
     """
     try:
-        print(f"🔑 Initializing Groq client with API key: {groq_api_key[:10]}...")
-        client = Groq(
-            api_key=groq_api_key,
+        print(f"🔑 Initializing Azure OpenAI client...")
+        client = AzureOpenAI(
+            api_key=azure_openai_config['api_key'],
+            api_version=azure_openai_config['api_version'],
+            azure_endpoint=azure_openai_config['endpoint'],
             timeout=60.0,  # 60 second timeout
             max_retries=2  # Retry up to 2 times
         )
@@ -36,9 +38,9 @@ async def generate_learning_path(repo_analysis, skill_level, domain, groq_api_ke
         prompt = create_analysis_prompt(repo_context, skill_level, domain)
         print(f"📄 Prompt created: {len(prompt)} chars")
         
-        print("🤖 Calling Groq LLM (llama3-8b-8192)...")
+        print("🤖 Calling Azure OpenAI...")
         response = client.chat.completions.create(
-            model="llama3-8b-8192",
+            model=azure_openai_config['deployment_name'],
             messages=[
                 {
                     "role": "system", 
@@ -50,8 +52,7 @@ async def generate_learning_path(repo_analysis, skill_level, domain, groq_api_ke
                 }
             ],
             temperature=0.7,
-            max_tokens=4000,
-            timeout=60.0  # Explicit timeout for this call
+            max_tokens=4000
         )
         print("✅ LLM response received")
         
@@ -229,7 +230,7 @@ def apply_unlocking_logic(learning_data):
         print(f"Warning: Failed to apply unlocking logic: {e}")
 
 # Helper function for content generation
-async def generate_detailed_content(learning_structure, repo_context, groq_api_key):
+async def generate_detailed_content(learning_structure, repo_context, azure_openai_config):
     """Generate detailed content for concepts and tasks (optional enhancement)"""
     # This can be used later to generate more detailed explanations
     pass 

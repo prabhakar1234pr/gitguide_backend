@@ -1,6 +1,6 @@
 """
-Shared utilities and database operations for agent endpoints
-Extracted to eliminate duplication and improve modularity
+Agent utilities for GitGuide
+Helper functions for agent operations and database interactions
 """
 
 import os
@@ -14,6 +14,13 @@ from typing import Optional, Dict, Any
 import json
 from pathlib import Path
 
+# Add path to import force_env_loader
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+from force_env_loader import force_load_env
+
+# Force load correct environment variables from .env file
+force_load_env()
+
 # Add the agent directory to path
 agent_dir = Path(__file__).parent.parent.parent / "agent"
 sys.path.append(str(agent_dir))
@@ -22,7 +29,7 @@ sys.path.append(str(agent_dir))
 from repository_analyzer import analyze_repository
 from learning_path_generator import generate_learning_path
 from prompts.learning_path_prompts import prepare_repository_context
-from groq import Groq
+from openai import AzureOpenAI
 
 from app.database_models import Project, Concept, Subtopic, Task
 from app.database_config import SessionLocal
@@ -260,7 +267,7 @@ async def process_project_background(project_id: int, user_id: str):
             # Initialize agent
             print("🤖 Initializing GitGuide Agent...")
             agent = GitGuideAgent()
-            print(f"✅ Agent initialized (Groq API Key present: {bool(agent.groq_api_key)})")
+            print(f"✅ Agent initialized (Azure OpenAI configured: {bool(agent.azure_openai_config['api_key'])})")
             
             # Process with agent
             print(f"🔍 Processing project with agent...")
@@ -307,9 +314,13 @@ async def get_repository_context_for_regeneration(project, agent):
 
 async def call_llm_for_regeneration(agent, prompt: str) -> Dict[str, Any]:
     """Call LLM for regeneration and parse response"""
-    groq_client = Groq(api_key=agent.groq_api_key)
-    response = groq_client.chat.completions.create(
-        model="llama3-8b-8192",
+    azure_client = AzureOpenAI(
+        api_key=agent.azure_openai_config['api_key'],
+        azure_endpoint=agent.azure_openai_config['endpoint'],
+        api_version=agent.azure_openai_config['api_version']
+    )
+    response = azure_client.chat.completions.create(
+        model=agent.azure_openai_config['deployment_name'],
         messages=[
             {
                 "role": "system", 
@@ -321,8 +332,7 @@ async def call_llm_for_regeneration(agent, prompt: str) -> Dict[str, Any]:
             }
         ],
         max_tokens=4000,
-        temperature=0.7,
-        timeout=60.0
+        temperature=0.7
     )
     
     try:

@@ -1,5 +1,14 @@
 import os
 import asyncio
+import sys
+
+# Add the parent directory to path to import force_env_loader
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from force_env_loader import force_load_env
+
+# Force load correct environment variables from .env file
+force_load_env()
+
 from dotenv import load_dotenv
 from .repository_analyzer import analyze_repository
 from .learning_path_generator import generate_learning_path
@@ -12,9 +21,14 @@ class GitGuideAgent:
     
     def __init__(self):
         self.github_token = os.getenv('GITHUB_ACCESS_TOKEN')
-        self.groq_api_key = os.getenv('GROQ_API_KEY')
+        self.azure_openai_config = {
+            'api_key': os.getenv('AZURE_OPENAI_KEY'),
+            'endpoint': os.getenv('AZURE_OPENAI_ENDPOINT'),
+            'api_version': os.getenv('AZURE_OPENAI_API_VERSION'),
+            'deployment_name': os.getenv('AZURE_OPENAI_DEPLOYMENT_GPT_4_1')
+        }
         self.backend_url = "http://localhost:8000"
-        print(f"🚀 GitGuideAgent initialized: Groq API key present: {bool(self.groq_api_key)}")
+        print(f"🚀 GitGuideAgent initialized: Azure OpenAI configured: {bool(self.azure_openai_config['api_key'])}")
         
     async def process_new_project(self, project_id, repo_url, skill_level, domain, user_id):
         """
@@ -55,7 +69,7 @@ class GitGuideAgent:
                 repo_analysis, 
                 skill_level, 
                 domain, 
-                self.groq_api_key
+                self.azure_openai_config
             )
             
             if not learning_path['success']:

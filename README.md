@@ -8,7 +8,7 @@ GitGuide Backend is a sophisticated AI-powered learning platform that analyzes G
 
 ### Key Features
 
-- **🤖 AI Agent System**: Automated learning path generation using Groq LLM
+- **🤖 AI Agent System**: Automated learning path generation using Azure OpenAI
 - **💬 Smart Chat Assistant**: Context-aware AI tutor with full project understanding
 - **📂 Project Management**: Complete GitHub repository analysis and learning path storage
 - **✅ Task Management**: Structured learning tasks with progress tracking
@@ -25,7 +25,7 @@ GitGuide Backend is a sophisticated AI-powered learning platform that analyzes G
 
 - Python 3.12+
 - PostgreSQL database
-- Groq API key (for AI features)
+- Azure OpenAI access (for AI features)
 - GitHub Personal Access Token
 - Clerk account (for authentication)
 
@@ -55,7 +55,10 @@ Create a `.env` file in the root directory:
 DATABASE_URL=postgresql+asyncpg://username:password@localhost/gitguide_db
 
 # AI Services
-GROQ_API_KEY=gsk_your_groq_api_key_here
+AZURE_OPENAI_KEY=your_azure_openai_key_here
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-04-01-preview
+AZURE_OPENAI_DEPLOYMENT_GPT_4_1=your-gpt4-deployment-name
 GITHUB_ACCESS_TOKEN=ghp_your_github_token_here
 
 # Authentication
@@ -121,7 +124,7 @@ gitguide_backend/
 │   ├── __init__.py
 │   ├── agent_orchestrator.py       # Main agent orchestrator & processing logic
 │   ├── repository_analyzer.py      # GitHub API integration & repo analysis
-│   ├── learning_path_generator.py  # Groq LLM integration & content generation
+│   ├── learning_path_generator.py  # Azure OpenAI integration & content generation
 │   └── api_client.py               # Backend database integration
 ├── prompts/                         # LLM Prompt Templates
 │   ├── __init__.py
@@ -294,7 +297,7 @@ python migrate_database.py --rollback
 
 2. **Learning Path Generation** (`learning_path_generator.py`)
    - Prepares repository context for LLM consumption
-   - Uses Groq LLM with specialized prompts
+   - Uses Azure OpenAI with specialized prompts
    - Generates hierarchical learning structure: Project Overview → Concepts → Subtopics → Tasks
    - Applies progressive unlocking logic
 
@@ -305,7 +308,7 @@ python migrate_database.py --rollback
 
 ### AI Models & Performance
 
-- **Model**: `llama3-70b-8192` (Groq)
+- **Model**: GPT-4 (Azure OpenAI)
 - **Learning Path Generation**: 4000 max tokens, 10-60 seconds
 - **Chat Responses**: 1000 max tokens, 1-3 seconds
 - **Repository Support**: Up to 200+ files per repository
@@ -408,7 +411,10 @@ Production environment requires:
 DATABASE_URL=postgresql+asyncpg://user:pass@host:port/db
 
 # AI Services (Required)
-GROQ_API_KEY=gsk_...
+AZURE_OPENAI_KEY=your_key...
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-04-01-preview
+AZURE_OPENAI_DEPLOYMENT_GPT_4_1=your-deployment-name
 GITHUB_ACCESS_TOKEN=ghp_...
 
 # Authentication (Required)

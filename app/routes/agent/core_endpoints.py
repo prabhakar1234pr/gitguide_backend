@@ -131,7 +131,7 @@ async def agent_health_check():
             "message": "GitGuide Agent is ready",
             "agent_available": True,
             "github_token": bool(agent.github_token),
-            "groq_api_key": bool(agent.groq_api_key)
+            "azure_openai_configured": bool(agent.azure_openai_config['api_key'])
         }
     except HTTPException as e:
         if e.status_code == 503:
