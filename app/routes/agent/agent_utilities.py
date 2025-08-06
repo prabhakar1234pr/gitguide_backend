@@ -153,8 +153,13 @@ async def get_project_processing_status(project_id: int, user_id: str) -> Dict[s
             status = "completed"
             message = f"Learning path generated with {len(concepts)} concepts"
         elif project.is_processed:
-            status = "completed_basic"
-            message = "Project processed, but no structured learning path available"
+            # Check if this was a failure case
+            if project.project_overview and "Processing failed:" in project.project_overview:
+                status = "failed"
+                message = project.project_overview
+            else:
+                status = "completed_basic"
+                message = "Project processed, but no structured learning path available"
         else:
             status = "not_processed"
             message = "Project not yet processed by agent"
@@ -288,11 +293,31 @@ async def process_project_background(project_id: int, user_id: str):
                 print("✅ Project status updated in database")
             else:
                 print(f"❌ Agent processing failed: {result.get('error', 'Unknown error')}")
+                # Mark project as processed but failed so frontend stops polling
+                project.is_processed = True
+                project.project_overview = f"Processing failed: {result.get('error', 'Unknown error')}"
+                await session.commit()
+                print("❌ Project marked as failed in database")
             
     except Exception as e:
         print(f"❌ Background processing failed for project {project_id}: {str(e)}")
         import traceback
         traceback.print_exc()
+        
+        # Mark project as failed in database so frontend stops polling
+        try:
+            async with SessionLocal() as session:
+                result = await session.execute(
+                    select(Project).filter(Project.project_id == project_id)
+                )
+                project = result.scalar_one_or_none()
+                if project:
+                    project.is_processed = True
+                    project.project_overview = f"Processing failed with exception: {str(e)}"
+                    await session.commit()
+                    print("❌ Project marked as failed due to exception")
+        except Exception as db_error:
+            print(f"❌ Failed to update project status after exception: {str(db_error)}")
 
 
 # ================== REGENERATION HELPERS ==================

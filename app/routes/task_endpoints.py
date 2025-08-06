@@ -149,13 +149,28 @@ async def update_task(
                 task.description = data.description
             if data.status is not None:
                 task.status = data.status
+                # If task is marked as completed, also set is_completed to True
+                if data.status == TaskStatus.completed:
+                    task.is_completed = True
+                else:
+                    task.is_completed = False
             if data.order is not None:
                 task.order = data.order
             
             await session.commit()
             await session.refresh(task)
             
-            print(f"✅ Task {task_id} updated")
+            print(f"✅ Task {task_id} updated with status: {task.status}")
+            
+            # If task was marked as completed, check if day should be unlocked
+            if data.status == TaskStatus.completed:
+                from app.routes.shared.days_utilities import check_and_unlock_next_day_after_task_completion
+                try:
+                    await check_and_unlock_next_day_after_task_completion(session, task.project_id, task_id)
+                except Exception as e:
+                    print(f"⚠️ Failed to check day unlock after task completion: {str(e)}")
+                    # Don't fail the whole request if day unlock check fails
+            
             return task
             
         except Exception as e:

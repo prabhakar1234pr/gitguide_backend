@@ -6,10 +6,13 @@ API endpoints for managing 14-day learning progression
 from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
 from typing import List, Dict, Any, Optional
 import json
 
 from app.database_config import get_db
+from app.database_models import Project, Day
+from app.routes.auth.auth_utilities import extract_user_id_from_token
 from app.routes.shared.days_utilities import (
     get_project_days, 
     get_current_day, 
@@ -125,15 +128,73 @@ async def mark_day_complete_endpoint(
 ):
     """Mark a day as completed and unlock the next day"""
     try:
-        print(f"✅ Marking Day {day_number} as completed for project {project_id}")
+        # Extract user ID from token for authentication
+        user_id = extract_user_id_from_token(authorization)
         
+        print(f"✅ Marking Day {day_number} as completed for project {project_id} by user {user_id}")
+        
+        # Validate day number
         if day_number < 0 or day_number > 14:
             raise HTTPException(status_code=400, detail="Day number must be between 0 and 14")
         
+        # Verify project ownership
+        project_result = await db.execute(
+            select(Project).filter(
+                Project.project_id == project_id,
+                Project.user_id == user_id
+            )
+        )
+        project = project_result.scalar_one_or_none()
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found or access denied")
+        
+        # Mark day as completed
         success = await mark_day_completed(db, project_id, day_number)
         
         if not success:
-            raise HTTPException(status_code=500, detail="Failed to mark day as completed")
+            # Get more detailed error information
+            from sqlalchemy import text
+            if day_number == 0:
+                # Check Day 0 verification status
+                result = await db.execute(text("""
+                    SELECT COUNT(*) as total_tasks, 
+                           COUNT(CASE WHEN t.is_verified = TRUE THEN 1 END) as verified_tasks
+                    FROM tasks t
+                    JOIN concepts c ON t.concept_id = c.concept_id
+                    JOIN days d ON c.day_id = d.day_id
+                    WHERE d.project_id = :project_id AND d.day_number = :day_number
+                    AND t.verification_type IS NOT NULL
+                """), {'project_id': project_id, 'day_number': day_number})
+                
+                task_counts = result.fetchone()
+                total_tasks = task_counts[0] if task_counts else 0
+                verified_tasks = task_counts[1] if task_counts else 0
+                
+                error_detail = f"Cannot mark Day {day_number} as completed: Only {verified_tasks}/{total_tasks} verification tasks completed"
+            else:
+                # Check regular day completion status
+                result = await db.execute(text("""
+                    SELECT COUNT(*) as total_tasks, 
+                           COUNT(CASE WHEN t.is_completed = TRUE THEN 1 END) as completed_tasks
+                    FROM tasks t
+                    WHERE t.project_id = :project_id
+                    AND EXISTS (
+                        SELECT 1 FROM concepts c 
+                        JOIN days d ON c.day_id = d.day_id 
+                        WHERE c.concept_id = t.concept_id 
+                        AND d.day_number = :day_number
+                    )
+                """), {'project_id': project_id, 'day_number': day_number})
+                
+                task_counts = result.fetchone()
+                total_tasks = task_counts[0] if task_counts else 0
+                completed_tasks = task_counts[1] if task_counts else 0
+                
+                error_detail = f"Cannot mark Day {day_number} as completed: Only {completed_tasks}/{total_tasks} tasks completed"
+                
+            print(f"❌ {error_detail}")
+            raise HTTPException(status_code=400, detail=error_detail)
         
         # Get updated current day
         current_day = await get_current_day(db, project_id)
@@ -344,6 +405,99 @@ async def verify_task_endpoint(
         print(f"❌ Error verifying task {task_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to verify task: {str(e)}")
 
+@router.get("/projects/{project_id}/days/0/debug")
+async def debug_day0_status_endpoint(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(None)
+):
+    """Debug endpoint to check Day 0 status and task verification"""
+    try:
+        from sqlalchemy import text
+        
+        print(f"🔍 Debug: Checking Day 0 status for project {project_id}")
+        
+        # Get Day 0 basic info
+        result = await db.execute(text("""
+            SELECT day_id, is_unlocked, is_completed, is_verified, requires_verification
+            FROM days 
+            WHERE project_id = :project_id AND day_number = 0
+        """), {'project_id': project_id})
+        
+        day0_info = result.fetchone()
+        if not day0_info:
+            return {
+                "success": False,
+                "error": "Day 0 not found for this project"
+            }
+        
+        # Get Day 0 tasks and their verification status
+        result = await db.execute(text("""
+            SELECT 
+                t.task_id,
+                t.title,
+                t.verification_type,
+                t.is_verified,
+                t.is_completed,
+                t.verification_data
+            FROM tasks t
+            JOIN concepts c ON t.concept_id = c.concept_id
+            JOIN days d ON c.day_id = d.day_id
+            WHERE d.project_id = :project_id AND d.day_number = 0
+            ORDER BY t.order
+        """), {'project_id': project_id})
+        
+        tasks = result.fetchall()
+        
+        # Get Day 1 status
+        result = await db.execute(text("""
+            SELECT day_id, is_unlocked, is_completed
+            FROM days 
+            WHERE project_id = :project_id AND day_number = 1
+        """), {'project_id': project_id})
+        
+        day1_info = result.fetchone()
+        
+        # Format response
+        task_details = []
+        for task in tasks:
+            task_details.append({
+                "task_id": task[0],
+                "title": task[1],
+                "verification_type": task[2],
+                "is_verified": task[3],
+                "is_completed": task[4],
+                "has_verification_data": bool(task[5])
+            })
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "day0": {
+                "day_id": day0_info[0],
+                "is_unlocked": day0_info[1],
+                "is_completed": day0_info[2],
+                "is_verified": day0_info[3],
+                "requires_verification": day0_info[4]
+            },
+            "day0_tasks": task_details,
+            "day1": {
+                "day_id": day1_info[0] if day1_info else None,
+                "is_unlocked": day1_info[1] if day1_info else False,
+                "is_completed": day1_info[2] if day1_info else False
+            } if day1_info else None,
+            "summary": {
+                "total_day0_tasks": len(tasks),
+                "verified_tasks": len([t for t in task_details if t["is_verified"]]),
+                "all_tasks_verified": len(tasks) > 0 and all(t["is_verified"] for t in task_details),
+                "day1_accessible": day1_info[1] if day1_info else False
+            }
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in Day 0 debug endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Debug failed: {str(e)}")
+
 @router.get("/projects/{project_id}/days/0/concepts")
 async def get_day0_concepts_endpoint(
     project_id: int,
@@ -428,6 +582,83 @@ async def get_day0_concepts_endpoint(
     except Exception as e:
         print(f"❌ Error getting Day 0 concepts for project {project_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get Day 0 concepts: {str(e)}")
+
+@router.get("/projects/{project_id}/test/day-progression")
+async def test_day_progression_endpoint(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(None)
+):
+    """Test endpoint to check day progression status"""
+    try:
+        user_id = extract_user_id_from_token(authorization)
+        
+        # Verify project ownership
+        project_result = await db.execute(
+            select(Project).filter(
+                Project.project_id == project_id,
+                Project.user_id == user_id
+            )
+        )
+        project = project_result.scalar_one_or_none()
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found or access denied")
+        
+        # Get all days status
+        days_result = await db.execute(text("""
+            SELECT day_number, is_unlocked, is_completed, is_verified
+            FROM days 
+            WHERE project_id = :project_id
+            ORDER BY day_number
+        """), {'project_id': project_id})
+        
+        days = days_result.fetchall()
+        
+        # Get task completion by day
+        tasks_result = await db.execute(text("""
+            SELECT 
+                d.day_number,
+                COUNT(t.task_id) as total_tasks,
+                COUNT(CASE WHEN t.is_completed = TRUE THEN 1 END) as completed_tasks,
+                COUNT(CASE WHEN t.is_verified = TRUE THEN 1 END) as verified_tasks
+            FROM days d
+            LEFT JOIN concepts c ON d.day_id = c.day_id
+            LEFT JOIN tasks t ON (c.concept_id = t.concept_id)
+            WHERE d.project_id = :project_id
+            GROUP BY d.day_number
+            ORDER BY d.day_number
+        """), {'project_id': project_id})
+        
+        task_stats = {row[0]: {"total": row[1], "completed": row[2], "verified": row[3]} for row in tasks_result.fetchall()}
+        
+        # Format response
+        day_status = []
+        for day in days:
+            day_num = day[0]
+            stats = task_stats.get(day_num, {"total": 0, "completed": 0, "verified": 0})
+            
+            day_status.append({
+                "day_number": day_num,
+                "is_unlocked": day[1],
+                "is_completed": day[2],
+                "is_verified": day[3] if len(day) > 3 else None,
+                "tasks": stats,
+                "can_be_marked_complete": (
+                    stats["verified"] == stats["total"] if day_num == 0 
+                    else stats["completed"] == stats["total"]
+                ) and stats["total"] > 0
+            })
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "day_progression": day_status
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in test day progression endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
 
 def _calculate_current_streak(days: List[Dict[str, Any]]) -> int:
     """Calculate current consecutive completion streak"""

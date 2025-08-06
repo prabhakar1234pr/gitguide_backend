@@ -5,7 +5,7 @@ from openai import AzureOpenAI
 
 # Add prompts directory to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from prompts import create_analysis_prompt, prepare_repository_context
+from prompts import create_analysis_prompt, prepare_repository_context, create_day_content_generation_prompt
 
 async def generate_learning_path(repo_analysis, skill_level, domain, azure_openai_config):
     """
@@ -18,7 +18,7 @@ async def generate_learning_path(repo_analysis, skill_level, domain, azure_opena
         azure_openai_config: Azure OpenAI configuration dict
     
     Returns:
-        dict: Structured learning path with project overview, concepts, subtopics, and tasks
+        dict: Structured learning path with project overview and Day 1 concepts
     """
     try:
         print(f"🔑 Initializing Azure OpenAI client...")
@@ -26,19 +26,119 @@ async def generate_learning_path(repo_analysis, skill_level, domain, azure_opena
             api_key=azure_openai_config['api_key'],
             api_version=azure_openai_config['api_version'],
             azure_endpoint=azure_openai_config['endpoint'],
-            timeout=60.0,  # 60 second timeout
-            max_retries=2  # Retry up to 2 times
+            timeout=azure_openai_config.get('timeout', 120.0),  # Configurable timeout
+            max_retries=3   # Increased to 3 retries
         )
         
         # Prepare repository context for LLM
         repo_context = prepare_repository_context(repo_analysis)
-        print(f"📝 Repository context prepared: {len(repo_context)} chars")
+        context_size = sum(len(str(v)) for v in repo_context.values() if isinstance(v, (str, list, dict)))
+        print(f"📝 Repository context prepared: {context_size} chars, {len(repo_context.get('file_samples', {}))} files")
         
-        # Generate project overview and learning structure
+        # Generate project overview and Day 1 learning structure
         prompt = create_analysis_prompt(repo_context, skill_level, domain)
         print(f"📄 Prompt created: {len(prompt)} chars")
         
-        print("🤖 Calling Azure OpenAI...")
+        print("🤖 Calling Azure OpenAI for Day 1 content...")
+        try:
+            response = client.chat.completions.create(
+                model=azure_openai_config['deployment_name'],
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a technical learning expert. You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text. Your response must start with { and end with }."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=12000,  # Increased for more content
+                stream=False
+            )
+        except Exception as api_error:
+            print(f"❌ Azure OpenAI API call failed: {type(api_error).__name__}: {str(api_error)}")
+            # Try with reduced max_tokens as fallback
+            if "timeout" in str(api_error).lower():
+                print("🔄 Retrying with reduced complexity...")
+                response = client.chat.completions.create(
+                    model=azure_openai_config['deployment_name'],
+                    messages=[
+                        {
+                            "role": "system", 
+                            "content": "You are a technical learning expert. You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text. Your response must start with { and end with }."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.7,
+                    max_tokens=8000,  # Reduced tokens for faster response
+                    stream=False
+                )
+            else:
+                raise api_error
+        print("✅ LLM response received")
+        
+        # Parse the LLM response
+        learning_structure = parse_llm_response(response.choices[0].message.content)
+        print(f"📊 Learning structure parsed: success={learning_structure['success']}")
+        
+        if not learning_structure['success']:
+            print(f"❌ Learning structure parsing failed: {learning_structure.get('error', 'Unknown error')}")
+            return learning_structure
+        
+        # Apply unlocking logic for Day 1
+        apply_day_unlocking_logic(learning_structure['data']['concepts'], day_number=1)
+        
+        return {
+            'success': True,
+            'project_overview': learning_structure['data']['project_overview'],
+            'day_1_concepts': learning_structure['data']['concepts']
+        }
+        
+    except Exception as e:
+        print(f"❌ Learning path generation error: {type(e).__name__}: {str(e)}")
+        return {
+            'success': False,
+            'error': f"Learning path generation failed: {str(e)}"
+        }
+
+async def generate_day_content(repo_analysis, day_number, skill_level, domain, project_overview, azure_openai_config):
+    """
+    Generate content for a specific day in the background
+    
+    Args:
+        repo_analysis: Repository analysis data
+        day_number: Day number to generate content for
+        skill_level: User's skill level
+        domain: Project domain
+        project_overview: Brief project overview for context
+        azure_openai_config: Azure OpenAI configuration dict
+    
+    Returns:
+        dict: Day content with 10 concepts, each with 10 subconcepts and tasks
+    """
+    try:
+        print(f"🔑 Initializing Azure OpenAI client for Day {day_number}...")
+        client = AzureOpenAI(
+            api_key=azure_openai_config['api_key'],
+            api_version=azure_openai_config['api_version'],
+            azure_endpoint=azure_openai_config['endpoint'],
+            timeout=azure_openai_config.get('timeout', 120.0),  # Configurable timeout
+            max_retries=3   # Increased to 3 retries
+        )
+        
+        # Prepare repository context
+        repo_context = prepare_repository_context(repo_analysis)
+        print(f"📝 Repository context prepared for Day {day_number}")
+        
+        # Generate day-specific content
+        prompt = create_day_content_generation_prompt(repo_context, day_number, skill_level, domain, project_overview)
+        print(f"📄 Day {day_number} prompt created: {len(prompt)} chars")
+        
+        print(f"🤖 Calling Azure OpenAI for Day {day_number} content...")
         response = client.chat.completions.create(
             model=azure_openai_config['deployment_name'],
             messages=[
@@ -52,35 +152,33 @@ async def generate_learning_path(repo_analysis, skill_level, domain, azure_opena
                 }
             ],
             temperature=0.7,
-            max_tokens=4000
+            max_tokens=8000  # Large token count for extensive content
         )
-        print("✅ LLM response received")
+        print(f"✅ Day {day_number} LLM response received")
         
         # Parse the LLM response
-        learning_structure = parse_llm_response(response.choices[0].message.content)
-        print(f"📊 Learning structure parsed: success={learning_structure['success']}")
+        day_structure = parse_day_response(response.choices[0].message.content)
+        print(f"📊 Day {day_number} structure parsed: success={day_structure['success']}")
         
-        if not learning_structure['success']:
-            print(f"❌ Learning structure parsing failed: {learning_structure.get('error', 'Unknown error')}")
-            return learning_structure
+        if not day_structure['success']:
+            print(f"❌ Day {day_number} structure parsing failed: {day_structure.get('error', 'Unknown error')}")
+            return day_structure
         
-        # Add unlocking logic
-        apply_unlocking_logic(learning_structure['data'])
+        # Apply unlocking logic (all locked initially)
+        apply_day_unlocking_logic(day_structure['data']['concepts'], day_number=day_number, all_locked=True)
         
         return {
             'success': True,
-            'project_overview': learning_structure['data']['project_overview'],
-            'concepts': learning_structure['data']['concepts']
+            'day_number': day_number,
+            'concepts': day_structure['data']['concepts']
         }
         
     except Exception as e:
-        print(f"❌ Learning path generation error: {type(e).__name__}: {str(e)}")
+        print(f"❌ Day {day_number} content generation error: {type(e).__name__}: {str(e)}")
         return {
             'success': False,
-            'error': f"Learning path generation failed: {str(e)}"
+            'error': f"Day {day_number} content generation failed: {str(e)}"
         }
-
-# Functions moved to prompts/learning_path_prompts.py
 
 def parse_llm_response(response_text):
     """Parse the LLM response and extract structured learning path"""
@@ -184,47 +282,78 @@ def parse_llm_response(response_text):
             'error': f'Response parsing failed: {str(e)}'
         }
 
+def parse_day_response(response_text):
+    """Parse the day-specific LLM response"""
+    # Use the same parsing logic as the main response
+    return parse_llm_response(response_text)
+
 def validate_learning_structure(data):
     """Validate that the learning structure has the required format"""
     try:
         # Check required top-level keys
-        if 'project_overview' not in data or 'concepts' not in data:
+        if 'project_overview' not in data and 'concepts' not in data:
+            return False
+        
+        # For day-specific responses, only concepts are required
+        if 'concepts' not in data:
             return False
         
         # Check concepts structure
         for concept in data['concepts']:
-            if not all(key in concept for key in ['id', 'name', 'subtopics']):
-                return False
-            
-            # Check subtopics structure
-            for subtopic in concept['subtopics']:
-                if not all(key in subtopic for key in ['id', 'name', 'tasks']):
+            if not all(key in concept for key in ['id', 'name', 'subconcepts']):
+                # Also check for old format for backward compatibility
+                if not all(key in concept for key in ['id', 'name', 'subtopics']):
                     return False
-                
-                # Check tasks structure
-                for task in subtopic['tasks']:
-                    if not all(key in task for key in ['id', 'name', 'description']):
+                else:
+                    # Convert old format to new format
+                    concept['subconcepts'] = concept.pop('subtopics', [])
+            
+            # Check subconcepts structure
+            subconcepts_key = 'subconcepts' if 'subconcepts' in concept else 'subtopics'
+            for subconcept in concept[subconcepts_key]:
+                if not all(key in subconcept for key in ['id', 'name', 'task']):
+                    # Check old format
+                    if not all(key in subconcept for key in ['id', 'name', 'tasks']):
                         return False
+                    else:
+                        # Convert old format: take first task
+                        if subconcept['tasks']:
+                            subconcept['task'] = subconcept['tasks'][0]
+                        else:
+                            return False
+                
+                # Check task structure
+                task = subconcept.get('task')
+                if not task or not all(key in task for key in ['id', 'name', 'description']):
+                    return False
         
         return True
         
     except:
         return False
 
-def apply_unlocking_logic(learning_data):
-    """Apply progressive unlocking logic to the learning structure"""
+def apply_day_unlocking_logic(concepts, day_number=1, all_locked=False):
+    """Apply progressive unlocking logic to day concepts"""
     try:
-        for i, concept in enumerate(learning_data['concepts']):
-            # First concept is unlocked, others are locked
-            concept['isUnlocked'] = (i == 0)
+        for i, concept in enumerate(concepts):
+            # For Day 1, first concept is unlocked; for other days, all locked initially
+            concept['isUnlocked'] = (not all_locked and i == 0)
             
-            for j, subtopic in enumerate(concept['subtopics']):
-                # First subtopic of first concept is unlocked
-                subtopic['isUnlocked'] = (i == 0 and j == 0)
+            subconcepts_key = 'subconcepts' if 'subconcepts' in concept else 'subtopics'
+            for j, subconcept in enumerate(concept[subconcepts_key]):
+                # First subconcept of first concept is unlocked for Day 1
+                subconcept['isUnlocked'] = (not all_locked and i == 0 and j == 0)
                 
-                for k, task in enumerate(subtopic['tasks']):
-                    # Only first task of first subtopic of first concept is unlocked
-                    task['isUnlocked'] = (i == 0 and j == 0 and k == 0)
+                # Handle task unlocking
+                task = subconcept.get('task')
+                if task:
+                    # Only first task of first subconcept of first concept is unlocked for Day 1
+                    task['isUnlocked'] = (not all_locked and i == 0 and j == 0)
+                
+                # Handle old format with multiple tasks
+                if 'tasks' in subconcept:
+                    for k, task in enumerate(subconcept['tasks']):
+                        task['isUnlocked'] = (not all_locked and i == 0 and j == 0 and k == 0)
         
     except Exception as e:
         print(f"Warning: Failed to apply unlocking logic: {e}")

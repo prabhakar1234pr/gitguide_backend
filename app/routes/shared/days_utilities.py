@@ -1151,6 +1151,57 @@ async def check_and_unlock_next_day_after_verification(session: AsyncSession, pr
         print(f"❌ Error checking day unlock after task verification: {str(e)}")
         return False
 
+async def check_and_unlock_next_day_after_task_completion(session: AsyncSession, project_id: int, task_id: int) -> bool:
+    """
+    Check if all tasks in the current day are completed and unlock next day if so
+    Called after a regular task (Days 1-14) is marked as completed
+    
+    Args:
+        session: Database session  
+        project_id: ID of the project
+        task_id: ID of the task that was just completed
+    
+    Returns:
+        True if next day was unlocked, False otherwise
+    """
+    try:
+        # Get the day number for this task
+        result = await session.execute(text("""
+            SELECT d.day_number 
+            FROM tasks t
+            JOIN concepts c ON t.concept_id = c.concept_id
+            JOIN days d ON c.day_id = d.day_id
+            WHERE t.task_id = :task_id
+        """), {'task_id': task_id})
+        
+        day_number = result.scalar_one_or_none()
+        if day_number is None:
+            print(f"❌ Could not find day number for task {task_id}")
+            return False
+        
+        print(f"📋 Task {task_id} belongs to Day {day_number}")
+        
+        # For regular days (1-14), check if all tasks in the day are completed
+        if day_number > 0:
+            # Try to unlock the next day (this will check if all tasks are completed)
+            day_unlocked = await unlock_next_day(session, project_id, day_number)
+            
+            # Also try to mark current day as completed if all tasks are done
+            if day_unlocked:
+                try:
+                    await mark_day_completed(session, project_id, day_number)
+                except Exception as e:
+                    print(f"⚠️ Failed to mark day {day_number} as completed: {str(e)}")
+            
+            return day_unlocked
+        else:
+            print(f"📋 Day {day_number} is Day 0, using verification logic instead")
+            return False
+        
+    except Exception as e:
+        print(f"❌ Error checking day unlock after task completion: {str(e)}")
+        return False
+
 async def unlock_next_day0_task(session: AsyncSession, project_id: int, completed_task_id: int) -> bool:
     """
     Unlock the next task in Day 0 sequence after completing current task

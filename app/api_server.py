@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routes import health_endpoints, project_endpoints, task_endpoints, chat_endpoints, days_endpoints
+from app.routes import health_endpoints, project_endpoints, task_endpoints, chat_endpoints, days_endpoints, progress_endpoints
 from app.routes.agent.core_endpoints import router as core_endpoints_router
 from app.routes.agent.regeneration_endpoints import router as regeneration_endpoints_router
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,21 +16,30 @@ app = FastAPI(
     * **🤖 AI Agent** - Automated learning path generation using advanced LLM technology
     * **💬 Chat Assistant** - Context-aware AI tutor for personalized guidance
     * **✅ Task Management** - Structured learning tasks with progress tracking
+    * **📊 Progress Tracking** - Real-time progress monitoring and day unlocking
     * **🔐 Authentication** - Secure user authentication via Clerk
     
-    ## Learning Hierarchy
+    ## New GitGuide Structure
     ```
-    Project → Days (14) → Concepts → Subtopics → Tasks
+    Project → Days (14) → Concepts (10/day) → Subconcepts (10/concept) → Tasks (1/subconcept)
     ```
+    
+    ## Key Features
+    * **Brief Project Overview** - Concise 3-page project summaries
+    * **100 Tasks per Day** - 10 concepts × 10 subconcepts × 1 task each
+    * **Background Content Generation** - AI generates next day content while user learns
+    * **GitHub API Verification** - Direct task verification through GitHub
+    * **Real-time Progress** - Live tracking of day, concept, and project progress
     
     ## Getting Started
     1. Authenticate with Clerk JWT token in Authorization header
     2. Create a project from a GitHub repository
-    3. Trigger AI agent to generate learning path (auto-creates 14 days)
-    4. Progress through Day 1 (unlocked) to unlock subsequent days
-    5. Chat with AI assistant for guidance
+    3. AI generates brief overview + Day 1 content (Day 2+ generated in background)
+    4. Complete Day 0 verification to unlock Day 1
+    5. Progress through tasks to unlock subsequent days
+    6. Chat with AI assistant for guidance
     """,
-    version="2.0.0 - Days Edition",
+    version="3.0.0 - Subconcepts & Progress Edition",
     contact={
         "name": "GitGuide Team",
         "url": "https://github.com/your-repo/gitguide",
@@ -54,6 +63,7 @@ app.add_middleware(
 app.include_router(health_endpoints.router, tags=["🏥 Health"])
 app.include_router(project_endpoints.router, tags=["📂 Projects"])
 app.include_router(days_endpoints.router, tags=["📅 14-Day Progression"])
+app.include_router(progress_endpoints.router, tags=["📊 Progress & Day Management"])
 app.include_router(task_endpoints.router, tags=["✅ Tasks"])
 app.include_router(core_endpoints_router, tags=["🤖 AI Agent - Core"])
 app.include_router(regeneration_endpoints_router, tags=["🔄 AI Agent - Regeneration"])
@@ -67,16 +77,21 @@ app.include_router(chat_endpoints.router, tags=["💬 Chat Assistant"])
 )
 def root():
     return {
-        "message": "🚀 Welcome to GitGuide API!",
-        "description": "Transform GitHub repositories into personalized 14-day learning journeys",
-        "version": "2.0.0 - Days Edition",
+        "message": "🚀 Welcome to GitGuide API v3.0!",
+        "description": "Transform GitHub repositories into personalized 14-day learning journeys with subconcepts",
+        "version": "3.0.0 - Subconcepts & Progress Edition",
         "features": [
             "📅 14-day structured learning progression",
-            "🤖 AI-powered learning path generation", 
+            "🧩 10 concepts per day, 10 subconcepts per concept", 
+            "🎯 1 task per subconcept (100 tasks/day)",
+            "🤖 AI-powered brief overviews and content generation",
+            "📊 Real-time progress tracking",
+            "🔄 Background day content generation",
+            "🔗 GitHub API task verification",
             "💬 Context-aware chat assistant",
             "🔓 Progressive day unlocking system"
         ],
-        "hierarchy": "Project → Days (14) → Concepts → Subtopics → Tasks",
+        "structure": "Project → Days (14) → Concepts (10) → Subconcepts (10) → Tasks (1)",
         "docs": "/docs",
         "health": "/ping"
     } 

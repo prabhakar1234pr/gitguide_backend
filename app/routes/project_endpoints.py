@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
 
-from app.database_models import Project, Concept, Subtopic, Task
+from app.database_models import Project, Concept, Subtopic, Task, Day
 from app.database_config import SessionLocal
 from app.routes.auth.auth_utilities import extract_user_id_from_token, get_user_details_from_clerk
 from app.routes.shared.logging_and_paths import get_logger
@@ -265,6 +265,13 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
             
             concepts_data = []
             for concept in concepts:
+                # Get the day information for this concept
+                day_result = await session.execute(
+                    select(Day).filter(Day.day_id == concept.day_id)
+                )
+                day = day_result.scalar_one_or_none()
+                day_number = day.day_number if day else 0
+                
                 # Get subtopics for this concept
                 subtopics_result = await session.execute(
                     select(Subtopic).filter(Subtopic.concept_id == concept.concept_id).order_by(Subtopic.order)
@@ -296,7 +303,9 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                             "difficulty": task.difficulty,
                             "files_to_study": json.loads(task.files_to_study) if task.files_to_study else [],
                             "isUnlocked": task.is_unlocked,
-                            "status": task.status.value
+                            "status": task.status.value,
+                            "is_completed": task.is_completed,  # Add completion status
+                            "is_verified": task.is_verified  # Add verification status
                         }
                         for task in tasks
                     ]
@@ -322,7 +331,8 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                             "isUnlocked": task.is_unlocked,
                             "status": task.status.value,
                             "verification_type": task.verification_type,
-                            "is_verified": task.is_verified
+                            "is_verified": task.is_verified,
+                            "is_completed": task.is_completed  # Add completion status for Day 0 tasks
                         }
                         for task in direct_tasks
                     ]
@@ -341,6 +351,7 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                     "name": concept.title,
                     "description": concept.description,
                     "isUnlocked": concept.is_unlocked,
+                    "day_number": day_number,  # Add day number
                     "subTopics": subtopics_data
                 })
             
