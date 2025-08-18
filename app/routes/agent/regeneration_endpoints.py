@@ -90,56 +90,62 @@ async def regenerate_whole_path(
 
         # Get project details and current concepts
         project = await get_project_for_regeneration(request.project_id, user_id)
-        
-        # Get current learning path
+
+        # Get current learning path aligned with actual schema
         async with SessionLocal() as session:
             result = await session.execute(
-                text("""
-                    SELECT c.*, 
-                           COALESCE(s.subtopics, '[]'::json) as subtopics
+                text(
+                    """
+                    SELECT 
+                        c.concept_external_id as concept_external_id,
+                        c.title as concept_title,
+                        c.description as concept_description,
+                        COALESCE(
+                            (
+                                SELECT json_agg(
+                                    json_build_object(
+                                        'id', s.subtopic_external_id,
+                                        'name', s.name,
+                                        'description', s.description,
+                                        'tasks', COALESCE(
+                                            (
+                                                SELECT json_agg(
+                                                    json_build_object(
+                                                        'id', t.task_external_id,
+                                                        'name', t.title,
+                                                        'description', t.description,
+                                                        'files_to_study', COALESCE(NULLIF(t.files_to_study,''),'[]')::json,
+                                                        'difficulty', t.difficulty
+                                                    )
+                                                    ORDER BY t."order"
+                                                )
+                                                FROM tasks t
+                                                WHERE t.subtopic_id = s.subtopic_id
+                                            ), '[]'::json)
+                                    )
+                                    ORDER BY s."order"
+                                )
+                                FROM subtopics s
+                                WHERE s.concept_id = c.concept_id
+                            ), '[]'::json
+                        ) as subtopics
                     FROM concepts c
-                    LEFT JOIN (
-                        SELECT concept_id,
-                               json_agg(
-                                   json_build_object(
-                                       'id', s.id,
-                                       'name', s.name,
-                                       'description', s.description,
-                                       'tasks', COALESCE(t.tasks, '[]'::json)
-                                   ) ORDER BY s.order_index
-                               ) as subtopics
-                        FROM subtopics s
-                        LEFT JOIN (
-                            SELECT subtopic_id,
-                                   json_agg(
-                                       json_build_object(
-                                           'id', t.id,
-                                           'name', t.name,
-                                           'description', t.description,
-                                           'files_to_study', t.files_to_study,
-                                           'difficulty', t.difficulty
-                                       ) ORDER BY t.order_index
-                                   ) as tasks
-                            FROM tasks t
-                            GROUP BY subtopic_id
-                        ) t ON s.id = t.subtopic_id
-                        GROUP BY concept_id
-                    ) s ON c.id = s.concept_id
                     WHERE c.project_id = :project_id
-                    ORDER BY c.order_index
-                """),
-                {"project_id": request.project_id}
+                    ORDER BY c."order"
+                    """
+                ),
+                {"project_id": request.project_id},
             )
-            concepts = result.fetchall()
+            rows = result.fetchall()
 
         current_concepts = [
             {
-                "id": c.id,
-                "name": c.name,
-                "description": c.description,
-                "subtopics": json.loads(c.subtopics) if c.subtopics else []
+                "id": row.concept_external_id,
+                "name": row.concept_title,
+                "description": row.concept_description,
+                "subtopics": json.loads(row.subtopics) if row.subtopics else [],
             }
-            for c in concepts
+            for row in rows
         ]
 
         # Get repository context
@@ -205,7 +211,7 @@ async def regenerate_concept(
             concept_dict = {
                 "id": concept.concept_external_id,
                 "name": concept.title,
-                "description": concept.description
+                "description": concept.description,
             }
 
             project_dict = {
@@ -236,45 +242,49 @@ async def regenerate_concept(
         async with SessionLocal() as session:
             # Delete existing subtopics and tasks for this concept
             await session.execute(
-                text("DELETE FROM tasks WHERE subtopic_id IN (SELECT subtopic_id FROM subtopics WHERE concept_id = :concept_id)"), 
-                {"concept_id": concept.concept_id}
+                text("DELETE FROM tasks WHERE subtopic_id IN (SELECT subtopic_id FROM subtopics WHERE concept_id = :concept_id)"),
+                {"concept_id": concept.concept_id},
             )
             await session.execute(
-                text("DELETE FROM subtopics WHERE concept_id = :concept_id"), 
-                {"concept_id": concept.concept_id}
+                text("DELETE FROM subtopics WHERE concept_id = :concept_id"),
+                {"concept_id": concept.concept_id},
             )
 
-            # Update concept
+            # Update concept (use title column)
             await session.execute(
-                text("UPDATE concepts SET name = :name, description = :description WHERE concept_external_id = :concept_external_id"),
-                {"name": new_concept["name"], "description": new_concept["description"], "concept_external_id": request.concept_id}
+                text("UPDATE concepts SET title = :title, description = :description WHERE concept_external_id = :concept_external_id"),
+                {"title": new_concept["name"], "description": new_concept["description"], "concept_external_id": request.concept_id},
             )
 
             # Save new subtopics and tasks
             for subtopic_index, subtopic in enumerate(new_concept["subtopics"]):
                 subtopic_result = await session.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO subtopics (concept_id, subtopic_external_id, name, description, "order", is_unlocked)
                         VALUES (:concept_id, :subtopic_external_id, :name, :description, :order, :is_unlocked)
                         RETURNING subtopic_id
-                    """),
+                        """
+                    ),
                     {
                         "concept_id": concept.concept_id,
                         "subtopic_external_id": subtopic["id"],
                         "name": subtopic["name"],
                         "description": subtopic["description"],
                         "order": subtopic_index,
-                        "is_unlocked": subtopic.get("isUnlocked", False)
-                    }
+                        "is_unlocked": subtopic.get("isUnlocked", False),
+                    },
                 )
                 subtopic_id = subtopic_result.fetchone()[0]
 
                 for task_index, task in enumerate(subtopic["tasks"]):
                     await session.execute(
-                        text("""
+                        text(
+                            """
                             INSERT INTO tasks (project_id, subtopic_id, task_external_id, title, description, files_to_study, difficulty, "order", is_unlocked, status)
                             VALUES (:project_id, :subtopic_id, :task_external_id, :title, :description, :files_to_study, :difficulty, :order, :is_unlocked, :status)
-                        """),
+                            """
+                        ),
                         {
                             "project_id": concept.project_id,
                             "subtopic_id": subtopic_id,
@@ -285,8 +295,8 @@ async def regenerate_concept(
                             "difficulty": task.get("difficulty", "medium"),
                             "order": task_index,
                             "is_unlocked": task.get("isUnlocked", False),
-                            "status": "not_started"
-                        }
+                            "status": "not_started",
+                        },
                     )
 
             await session.commit()
@@ -338,26 +348,27 @@ async def regenerate_subtopic(
             if not subtopic:
                 raise HTTPException(status_code=404, detail="Subtopic not found")
 
+            # Get all tasks for this subtopic
             result = await session.execute(
-                text("SELECT * FROM tasks WHERE task_id = :task_id AND subtopic_id = :subtopic_id"),
-                {"task_id": request.task_id, "subtopic_id": subtopic.subtopic_id}
+                text("SELECT * FROM tasks WHERE subtopic_id = :subtopic_id ORDER BY \"order\""),
+                {"subtopic_id": subtopic.subtopic_id},
             )
             tasks = result.fetchall()
 
         current_subtopic = {
-            "id": subtopic.id,
+            "id": subtopic.subtopic_external_id,
             "name": subtopic.name,
             "description": subtopic.description,
             "tasks": [
                 {
-                    "id": t.id,
-                    "name": t.name,
+                    "id": t.task_external_id,
+                    "name": t.title,
                     "description": t.description,
                     "files_to_study": json.loads(t.files_to_study) if t.files_to_study else [],
-                    "difficulty": t.difficulty
+                    "difficulty": t.difficulty,
                 }
                 for t in tasks
-            ]
+            ],
         }
 
         parent_concept = {

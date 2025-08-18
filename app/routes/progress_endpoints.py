@@ -140,8 +140,8 @@ async def complete_task(
         if not progress_update['success']:
             raise HTTPException(status_code=500, detail=progress_update['error'])
         
-        # If day was completed, trigger background generation for next day
-        if progress_update.get('day_completed') and not progress_update.get('next_day_unlocked', True):
+        # If day was completed, trigger background generation for the next ungenerated day
+        if progress_update.get('day_completed'):
             # Find the next day that needs content
             next_day_result = await db.execute(
                 text("""
@@ -360,19 +360,35 @@ async def trigger_background_day_generation(project_id: int, day_number: int, fo
     try:
         print(f"🔄 Background: Starting Day {day_number} generation for project {project_id}")
         
-        # Import here to avoid circular imports
-        from app.agent.agent_orchestrator import GitGuideAgent
+        # Import here to avoid circular imports (correct path for top-level agent package)
+        from agent.agent_orchestrator import GitGuideAgent
         
-        # This would need to be implemented to get the repository analysis and project details
-        # For now, this is a placeholder
         agent = GitGuideAgent()
         
-        # In a real implementation, you would:
-        # 1. Get project details and repository analysis from database
-        # 2. Call agent.generate_day_on_demand()
-        # 3. Save the results
+        # Get minimal repo context to pass; we can re-run analyze_repository for robustness
+        from agent.repository_analyzer import analyze_repository
+        from sqlalchemy import text
+        res = await get_db()( )
         
-        print(f"✅ Background: Day {day_number} generation completed for project {project_id}")
+        # Fetch repo_url, skill_level, domain for the project
+        # We do not have a simple dependency here; use a one-off session
+        from app.database_config import SessionLocal
+        async with SessionLocal() as db:
+            proj = await db.execute(text("SELECT repo_url, skill_level, domain FROM projects WHERE project_id = :pid"), {"pid": project_id})
+            row = proj.fetchone()
+            if not row:
+                print(f"❌ Background: Project {project_id} not found")
+                return
+            repo_url, skill_level, domain = row
+        
+        # Analyze repository quickly (cached endpoints make this cheap); could be optimized later
+        repo_analysis = await analyze_repository(repo_url, agent.github_token)
+        if not repo_analysis.get('success'):
+            print(f"❌ Background: Repo analysis failed: {repo_analysis.get('error')}")
+            return
+        
+        await agent.generate_next_day_background(project_id, day_number, repo_analysis, skill_level, domain, '')
+        print(f"✅ Background: Day {day_number} generation triggered for project {project_id}")
         
     except Exception as e:
         print(f"❌ Background: Day {day_number} generation failed: {str(e)}")

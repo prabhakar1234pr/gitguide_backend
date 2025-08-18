@@ -211,10 +211,15 @@ async def delete_project(project_id: int, authorization: str = Header(None)):
 
 @router.get("/projects/{project_id}/concepts",
     summary="Get Learning Path",
-    description="Retrieve the AI-generated learning path with concepts, subtopics, and tasks",
+    description="Retrieve the AI-generated learning path with concepts, subtopics, and tasks. Optionally scope by day.",
     response_description="Hierarchical learning structure for the project"
 )
-async def get_project_concepts(project_id: int, authorization: str = Header(None)):
+async def get_project_concepts(
+    project_id: int,
+    authorization: str = Header(None),
+    active_day: int | None = None,
+    include_past: bool = False
+):
     """Get all concepts for a specific project"""
     logger.info(f"🎯 Fetching concepts for project {project_id}")
     logger.info(f"🔑 Authorization header present: {bool(authorization)}")
@@ -257,10 +262,95 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                     logger.warning(f"❌ Project {project_id} does not exist in database")
                 raise HTTPException(status_code=404, detail="Project not found")
             
-            # Get concepts for this project
-            concepts_result = await session.execute(
-                select(Concept).filter(Concept.project_id == project_id).order_by(Concept.order)
-            )
+            # Safety: ensure Day 1 stays locked until all Day 0 verification tasks are verified
+            try:
+                from sqlalchemy import text
+                counts_res = await session.execute(text(
+                    """
+                    SELECT COUNT(*) as total_tasks,
+                           COUNT(CASE WHEN t.is_verified = TRUE THEN 1 END) as verified_tasks
+                    FROM tasks t
+                    JOIN concepts c ON t.concept_id = c.concept_id
+                    JOIN days d ON c.day_id = d.day_id
+                    WHERE d.project_id = :project_id AND d.day_number = 0
+                          AND t.verification_type IS NOT NULL
+                    """
+                ), {"project_id": project_id})
+                total_tasks, verified_tasks = counts_res.fetchone() or (0, 0)
+                if (total_tasks or 0) > 0 and (verified_tasks or 0) < (total_tasks or 0):
+                    # Re-lock Day 1 defensively if Day 0 not fully verified
+                    await session.execute(text(
+                        "UPDATE days SET is_unlocked = FALSE WHERE project_id = :project_id AND day_number = 1"
+                    ), {"project_id": project_id})
+                    await session.commit()
+            except Exception as _:
+                pass
+
+            # If requesting a specific active day and it's unlocked, defensively ensure its concepts/subtopics are unlocked
+            if active_day is not None:
+                try:
+                    from sqlalchemy import text
+                    # Check day state
+                    day_state_res = await session.execute(text(
+                        "SELECT is_unlocked FROM days WHERE project_id = :project_id AND day_number = :day_number"
+                    ), {"project_id": project_id, "day_number": active_day})
+                    day_state_row = day_state_res.fetchone()
+                    if day_state_row and bool(day_state_row[0]):
+                        # Unlock concepts/subtopics for this day idempotently
+                        await session.execute(text(
+                            """
+                            UPDATE concepts c
+                            SET is_unlocked = TRUE
+                            FROM days d
+                            WHERE c.day_id = d.day_id AND d.project_id = :project_id AND d.day_number = :day_number
+                            """
+                        ), {"project_id": project_id, "day_number": active_day})
+
+                        await session.execute(text(
+                            """
+                            UPDATE subtopics s
+                            SET is_unlocked = TRUE
+                            WHERE s.concept_id IN (
+                                SELECT c.concept_id FROM concepts c
+                                JOIN days d ON d.day_id = c.day_id
+                                WHERE d.project_id = :project_id AND d.day_number = :day_number
+                            )
+                            """
+                        ), {"project_id": project_id, "day_number": active_day})
+
+                        # First task per subtopic unlocked; others locked
+                        await session.execute(text(
+                            """
+                            WITH subtopic_first_tasks AS (
+                                SELECT DISTINCT ON (t.subtopic_id) t.task_id
+                                FROM tasks t
+                                JOIN subtopics s ON s.subtopic_id = t.subtopic_id
+                                JOIN concepts c ON c.concept_id = s.concept_id
+                                JOIN days d ON d.day_id = c.day_id
+                                WHERE d.project_id = :project_id AND d.day_number = :day_number
+                                ORDER BY t.subtopic_id, t."order"
+                            )
+                            UPDATE tasks AS all_tasks
+                            SET is_unlocked = CASE
+                                WHEN all_tasks.task_id IN (SELECT task_id FROM subtopic_first_tasks) THEN TRUE
+                                ELSE FALSE
+                            END
+                            WHERE all_tasks.subtopic_id IN (
+                                SELECT s.subtopic_id FROM subtopics s
+                                JOIN concepts c ON c.concept_id = s.concept_id
+                                JOIN days d ON d.day_id = c.day_id
+                                WHERE d.project_id = :project_id AND d.day_number = :day_number
+                            );
+                            """
+                        ), {"project_id": project_id, "day_number": active_day})
+                        await session.commit()
+                except Exception as _:
+                    pass
+
+            # Get concepts for this project (optionally scoped by day)
+            concepts_query = select(Concept).filter(Concept.project_id == project_id)
+            concepts_query = concepts_query.order_by(Concept.order)
+            concepts_result = await session.execute(concepts_query)
             concepts = concepts_result.scalars().all()
             
             concepts_data = []
@@ -269,8 +359,26 @@ async def get_project_concepts(project_id: int, authorization: str = Header(None
                 day_result = await session.execute(
                     select(Day).filter(Day.day_id == concept.day_id)
                 )
-                day = day_result.scalar_one_or_none()
-                day_number = day.day_number if day else 0
+                day_obj = day_result.scalar_one_or_none()
+                if not day_obj:
+                    continue
+                # Only return concepts for unlocked days (hide future days' content)
+                # If a specific active day is requested, filter strictly to that day (and optionally include past days)
+                day_number = day_obj.day_number
+                if active_day is not None:
+                    if include_past:
+                        if day_number > active_day:
+                            continue
+                    else:
+                        if day_number != active_day:
+                            continue
+                    # Never leak future locked days even if requested
+                    if not day_obj.is_unlocked:
+                        continue
+                else:
+                    # Default behavior: only include unlocked days
+                    if not day_obj.is_unlocked:
+                        continue
                 
                 # Get subtopics for this concept
                 subtopics_result = await session.execute(

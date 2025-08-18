@@ -56,40 +56,39 @@ KEY FILES CONTENT:{file_contents_text}
 TASK:
 Create a GitGuide learning structure with:
 
-1. PROJECT OVERVIEW: A very brief, concise summary (2-4 sentences) explaining what this project does, its architecture, and what the learner will gain by studying it. Keep it focused and avoid unnecessary detail.
+1. PROJECT OVERVIEW: A comprehensive overview (6-10 sentences) explaining what this project does, its architecture, primary modules, data flow, and what the learner will gain by studying it. Make it concrete and repo-aware (reference files/folders where helpful). No code.
 
-2. LEARNING STRUCTURE: Break down the learning journey into concepts. Each concept should have a very brief description (1-2 sentences) and should guide the user step by step. Each concept can have any number of subconcepts and tasks as appropriate for the project and the learner's level. Subconcepts should also have very brief descriptions (1 sentence). After reading a concept's description, the user should be able to do the tasks for that concept.
+2. LEARNING STRUCTURE: Break down the learning journey into rich concepts. Each concept MUST have a detailed multi-sentence description (4-6 sentences) that teaches the idea before tasks. For each concept, create MANY subconcepts (at least 3-5) with clear 2-3 sentence descriptions.
 
-3. TASKS: For each subconcept, create small, specific, actionable tasks. Tasks should be detailed, not vague, and should never include code. Do not ask the user to "build a ML pipeline" or similar large/vague tasks. Instead, break down the journey into incremental, teachable steps. Each task should reference actual files, functions, or code patterns from this repository, but should not provide code. The AI should teach the user the concept and then give the task, not just list tasks.
+3. TASKS: For each subconcept, create MULTIPLE tasks (at least 2-4). Tasks must be detailed step-by-step (5-10 sentences), specific, actionable, and must reference actual files, functions, or code patterns from this repository. Never include code. The AI should teach first, then ask the user to apply.
 
 IMPORTANT REQUIREMENTS:
-- All descriptions (project overview, concept, subconcept) must be very brief and focused.
-- Tasks must be small, specific, actionable, and never include code.
-- The learning journey should be incremental and step by step, with each concept building on the previous.
-- The number of concepts, subconcepts, and tasks should be appropriate for the project and the learner's level (no fixed number).
-- Do not include any code in the tasks or descriptions.
-- Do not be vague. Every task must be clear and actionable.
+- Descriptions (project overview, concept, subconcept) must be detailed and instructional (not one-liners).
+- Tasks must be small, specific, actionable, step-by-step, and never include code.
+- The journey should be incremental with clear progression and dependencies.
+- Prefer 7-10 concepts for Day 1 if feasible; adapt counts to repo size while staying comprehensive.
+- Use repo-aware references (file paths, modules) in tasks when applicable.
 - Do not include any explanations or markdown, only valid JSON.
 
 CRITICAL: You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text. Your response must start with {{ and end with }}. Nothing else.
 
 RESPONSE FORMAT (JSON ONLY):
 {{
-    "project_overview": "Very brief summary...",
+    "project_overview": "Comprehensive project overview (6-10 sentences) grounded in repository structure...",
     "concepts": [
         {{
             "id": "concept-0",
-            "name": "Brief concept name",
-            "description": "Very brief description of what this concept teaches (1-2 sentences)",
+            "name": "Concept name",
+            "description": "Detailed 4-6 sentence explanation teaching the concept before tasks; include concrete repository touchpoints.",
             "subconcepts": [
                 {{
                     "id": "subconcept-0-0",
-                    "name": "Brief subconcept name",
-                    "description": "One sentence describing what this subconcept covers",
+                    "name": "Subconcept name",
+                    "description": "2-3 sentence explanation of the specific angle covered by this subconcept.",
                     "task": {{
                         "id": "task-0-0-0",
                         "name": "Specific, actionable task referencing actual files (no code)",
-                        "description": "Detailed, step-by-step task description with specific file references and what to learn. No code. No vagueness.",
+                        "description": "Detailed, step-by-step task (5-10 sentences) with specific file references and clear acceptance criteria. No code.",
                         "files_to_study": ["actual/file/path.js", "another/file.py"],
                         "difficulty": "easy|medium|hard",
                         "verification_type": "github_api"
@@ -479,18 +478,13 @@ PROJECT OVERVIEW CONTEXT:
 KEY FILES CONTENT:{file_contents_text}
 
 TASK:
-Generate Day {day_number} learning content as a step-by-step journey. Each concept should have a very brief description (1-2 sentences) and should guide the user step by step. Each concept can have any number of subconcepts and tasks as appropriate for the project and the learner's level. Subconcepts should also have very brief descriptions (1 sentence). After reading a concept's description, the user should be able to do the tasks for that concept.
-
-For each subconcept, create small, specific, actionable tasks. Tasks should be detailed, not vague, and should never include code. Do not ask the user to "build a ML pipeline" or similar large/vague tasks. Instead, break down the journey into incremental, teachable steps. Each task should reference actual files, functions, or code patterns from this repository, but should not provide code. The AI should teach the user the concept and then give the task, not just list tasks.
+Generate Day {day_number} content as a detailed step-by-step journey. Aim for 6-8 concepts for the day, each with 3-6 subconcepts, and each subconcept with 2-4 tasks. Each concept MUST include a detailed 4-6 sentence description. Each subconcept MUST include a clear 2-3 sentence description. For each task, write 5-10 sentence, step-by-step instructions referencing actual files/modules from the repository. Never include code.
 
 IMPORTANT REQUIREMENTS:
-- All descriptions (concept, subconcept) must be very brief and focused.
-- Tasks must be small, specific, actionable, and never include code.
-- The learning journey should be incremental and step by step, with each concept building on the previous.
-- The number of concepts, subconcepts, and tasks should be appropriate for the project and the learner's level (no fixed number).
-- Do not include any code in the tasks or descriptions.
-- Do not be vague. Every task must be clear and actionable.
-- Do not include any explanations or markdown, only valid JSON.
+- Descriptions must be detailed and instructional (not one-liners).
+- Tasks must be specific, actionable, step-by-step, with file references; no code.
+- Keep progression coherent and repo-aware.
+- Output ONLY valid JSON; no markdown or extra text.
 
 CRITICAL: You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text. Your response must start with {{ and end with }}. Nothing else.
 
@@ -500,17 +494,17 @@ RESPONSE FORMAT (JSON ONLY):
     "concepts": [
         {{
             "id": "day{day_number}-concept-0",
-            "name": "Brief concept name",
-            "description": "Very brief description of what this concept teaches (1-2 sentences)",
+            "name": "Concept name",
+            "description": "Detailed 4-6 sentence description teaching this concept; mention repo files/modules when relevant.",
             "subconcepts": [
                 {{
                     "id": "day{day_number}-subconcept-0-0",
-                    "name": "Brief subconcept name",
-                    "description": "One sentence describing what this subconcept covers",
+                    "name": "Subconcept name",
+                    "description": "2-3 sentence description of the specific topic",
                     "task": {{
                         "id": "day{day_number}-task-0-0-0",
                         "name": "Specific, actionable task referencing actual files (no code)",
-                        "description": "Detailed, step-by-step task description with specific file references and what to learn. No code. No vagueness.",
+                        "description": "Step-by-step (5-10 sentences) task with concrete file references and acceptance criteria. No code.",
                         "files_to_study": ["actual/file/path.js", "another/file.py"],
                         "difficulty": "easy|medium|hard",
                         "verification_type": "github_api"

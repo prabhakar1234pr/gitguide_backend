@@ -8,7 +8,7 @@ import json
 import aiohttp
 import sys
 from typing import Dict, Any, Optional
-from sqlalchemy import select
+from sqlalchemy import select, text
 from app.database_models import Project, Concept, Subtopic, Task
 from app.database_config import SessionLocal
 
@@ -17,7 +17,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.routes.shared.days_utilities import create_15_days_for_project
 
 async def save_learning_content(project_id: int, learning_path: Dict[str, Any], repo_info: Dict[str, Any]) -> Dict[str, Any]:
-    """Save learning content to database directly"""
+    """Save learning content to database directly.
+
+    Supports payloads of the form:
+      - { "concepts": [...] }                         # general save/regeneration
+      - { "day_0_concepts": [...] }                   # day-specific content
+      - { "day_1_concepts": [...]} .. { "day_14_concepts": [...] }
+    """
     async with SessionLocal() as session:
         try:
             print(f"💾 Saving learning content for project {project_id}")
@@ -32,28 +38,48 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
             if not project:
                 raise Exception(f"Project {project_id} not found")
             
-            # Update project overview
-            project.project_overview = learning_path.get('project_overview', '')
-            project.tech_stack = json.dumps(repo_info.get('tech_stack', []))
+            # Update project overview/metadata if provided
+            if 'project_overview' in learning_path:
+                project.project_overview = learning_path.get('project_overview', '')
+            if repo_info:
+                project.tech_stack = json.dumps(repo_info.get('tech_stack', []))
+            # Mark as processed when first content saved
             project.is_processed = True
             
-            # 🆕 CREATE DAY 0 + 14 LEARNING DAYS FOR NEW PROJECT
-            print(f"📅 Creating Day 0 + 14-day learning progression for project {project_id}")
-            try:
-                # Extract project name from repo URL
-                project_name = repo_info.get('repo_name') or project.repo_name
-                if not project_name and project.repo_url:
-                    project_name = project.repo_url.split('/')[-1].replace('.git', '')
-                
-                days_created = await create_15_days_for_project(session, project_id, project_name)
-                print(f"✅ Created {len(days_created)} days (Day 0 unlocked for verification, Days 1-14 locked)")
-            except Exception as days_error:
-                print(f"⚠️ Failed to create days (continuing with concepts): {str(days_error)}")
-                # Continue processing even if days creation fails
+            # 🆕 Ensure days exist once
+            existing_day = await session.execute(text("SELECT day_id FROM days WHERE project_id = :project_id LIMIT 1"), {"project_id": project_id})
+            if not existing_day.fetchone():
+                print(f"📅 Creating Day 0 + 14-day learning progression for project {project_id}")
+                try:
+                    project_name = repo_info.get('repo_name') or project.repo_name
+                    if not project_name and project.repo_url:
+                        project_name = project.repo_url.split('/')[-1].replace('.git', '')
+                    days_created = await create_15_days_for_project(session, project_id, project_name)
+                    print(f"✅ Created {len(days_created)} days (Day 0 unlocked for verification, Days 1-14 locked)")
+                except Exception as days_error:
+                    print(f"⚠️ Failed to create days (continuing with concepts): {str(days_error)}")
             
-            # Save concepts
-            concepts_data = learning_path.get('concepts', [])
-            print(f"📚 Processing {len(concepts_data)} concepts")
+            # Determine target day and concepts array
+            target_day_number: Optional[int] = None
+            concepts_data = []
+            if 'concepts' in learning_path:
+                concepts_data = learning_path.get('concepts', [])
+            else:
+                # day_n_concepts keys
+                for n in range(0, 15):
+                    key = f'day_{n}_concepts'
+                    if key in learning_path and isinstance(learning_path[key], list):
+                        target_day_number = n
+                        concepts_data = learning_path[key]
+                        break
+
+            print(f"📚 Processing {len(concepts_data)} concepts (day={target_day_number if target_day_number is not None else 'N/A'})")
+
+            # If day-specific, fetch day row to set day_id and lock state
+            day_row = None
+            if target_day_number is not None:
+                res = await session.execute(text("SELECT day_id, is_unlocked FROM days WHERE project_id = :project_id AND day_number = :day_number"), {"project_id": project_id, "day_number": target_day_number})
+                day_row = res.fetchone()
             
             for i, concept_data in enumerate(concepts_data):
                 print(f"📖 Concept {i+1}: {concept_data.get('name', 'Unnamed')}")
@@ -62,18 +88,23 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
                 
                 concept = Concept(
                     project_id=project_id,
+                    day_id=day_row[0] if day_row else None,
                     concept_external_id=concept_data['id'],
-                    name=concept_data['name'],
+                    title=concept_data.get('name', concept_data.get('title', '')),
                     description=concept_data.get('description', ''),
-                    order=int(concept_data['id'].split('-')[1]),
-                    is_unlocked=concept_data.get('isUnlocked', False)
+                    order=(concept_data.get('order') if isinstance(concept_data.get('order'), int) else (int(concept_data['id'].split('-')[-1]) if '-' in concept_data['id'] else i + 1)),
+                    is_unlocked=(bool(day_row[1]) if day_row is not None else concept_data.get('isUnlocked', False))
                 )
                 session.add(concept)
                 await session.flush()
                 print(f"✅ Concept saved with ID: {concept.concept_id}")
                 
-                # Save subtopics
-                subtopics_data = concept_data.get('subtopics', concept_data.get('subTopics', []))
+                # Save subtopics (support 'subtopics', 'subTopics', or 'subconcepts')
+                subtopics_data = (
+                    concept_data.get('subtopics')
+                    or concept_data.get('subTopics')
+                    or concept_data.get('subconcepts', [])
+                )
                 print(f"📝 Processing {len(subtopics_data)} subtopics for concept {concept.concept_id}")
                 
                 for j, subtopic_data in enumerate(subtopics_data):
@@ -81,8 +112,12 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
                         print(f"   📄 Subtopic {j+1}: {subtopic_data.get('name', 'Unnamed')}")
                         print(f"      ID: {subtopic_data.get('id', 'No ID')}")
                         
-                        # Check both 'tasks' and 'subTasks' keys
-                        tasks_count = len(subtopic_data.get('tasks', subtopic_data.get('subTasks', [])))
+                        # Check all supported task shapes: single 'task', array 'tasks', or 'subTasks'
+                        if 'task' in subtopic_data and subtopic_data.get('task'):
+                            candidate_tasks = [subtopic_data['task']]
+                        else:
+                            candidate_tasks = subtopic_data.get('tasks', subtopic_data.get('subTasks', []))
+                        tasks_count = len(candidate_tasks)
                         print(f"      Tasks: {tasks_count}")
                         
                         # Safe order calculation - fallback to enumeration index
@@ -94,18 +129,18 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
                         
                         subtopic = Subtopic(
                             concept_id=concept.concept_id,
-                            subtopic_external_id=subtopic_data['id'],
-                            name=subtopic_data['name'],
+                            subtopic_external_id=subtopic_data.get('id', f"subtopic-{i}-{j}"),
+                            name=subtopic_data.get('name', ''),
                             description=subtopic_data.get('description', ''),
                             order=subtopic_order,
-                            is_unlocked=subtopic_data.get('isUnlocked', False)
+                            is_unlocked=subtopic_data.get('isUnlocked', bool(day_row[1]) if day_row is not None else False),
                         )
                         session.add(subtopic)
                         await session.flush()
                         print(f"   ✅ Subtopic saved with ID: {subtopic.subtopic_id}")
                         
-                        # Save tasks - check both keys
-                        tasks_data = subtopic_data.get('tasks', subtopic_data.get('subTasks', []))
+                        # Save tasks (normalize to list)
+                        tasks_data = candidate_tasks
                         print(f"   📋 Processing {len(tasks_data)} tasks for subtopic {subtopic.subtopic_id}")
                         
                         for k, task_data in enumerate(tasks_data):
@@ -122,13 +157,13 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
                                 task = Task(
                                     project_id=project_id,
                                     subtopic_id=subtopic.subtopic_id,
-                                    task_external_id=task_data['id'],
-                                    title=task_data['name'],
+                                    task_external_id=task_data.get('id', f"task-{i}-{j}-{k}"),
+                                    title=task_data.get('name', task_data.get('title', '')),
                                     description=task_data.get('description', ''),
                                     order=task_order,
                                     difficulty=task_data.get('difficulty', 'medium'),
                                     files_to_study=json.dumps(task_data.get('files_to_study', [])),
-                                    is_unlocked=task_data.get('isUnlocked', False)
+                                    is_unlocked=task_data.get('isUnlocked', bool(day_row[1]) if day_row is not None else False),
                                 )
                                 session.add(task)
                                 print(f"      ✅ Task saved: {task.title}")
@@ -145,6 +180,13 @@ async def save_learning_content(project_id: int, learning_path: Dict[str, Any], 
                         traceback.print_exc()
                         continue
             
+            # If day-specific, mark day content as generated
+            if target_day_number is not None:
+                await session.execute(
+                    text("UPDATE days SET is_content_generated = TRUE WHERE project_id = :project_id AND day_number = :day_number"),
+                    {"project_id": project_id, "day_number": target_day_number},
+                )
+
             await session.commit()
             print("✅ All learning content saved successfully")
             print("🚀 New hierarchy: Project → Days (14) → Concepts → Subtopics → Tasks")
@@ -200,44 +242,7 @@ async def create_task_api(task_data, backend_url, user_id):
         'task_id': f"task_{task_data['order']}"
     }
 
-# Direct database insertion for MVP 
-async def save_tasks_directly_to_db(tasks_data, project_id):
-    """
-    Direct database save function - deprecated in favor of agent route integration
-    """
-    try:
-        from app.models import Task
-        from app.db import SessionLocal
-        
-        async with SessionLocal() as session:
-            created_tasks = []
-            
-            for task_data in tasks_data:
-                new_task = Task(
-                    project_id=project_id,
-                    title=task_data['title'],
-                    description=task_data['description'],
-                    order=task_data['order']
-                )
-                
-                session.add(new_task)
-                created_tasks.append(new_task)
-            
-            await session.commit()
-            
-            print(f"✅ Directly saved {len(created_tasks)} tasks to database")
-            
-            return {
-                'success': True,
-                'tasks_created': len(created_tasks)
-            }
-            
-    except Exception as e:
-        print(f"❌ Direct database save failed: {str(e)}")
-        return {
-            'success': False,
-            'error': f"Direct database save failed: {str(e)}"
-        }
+# Deprecated direct DB save helpers removed (kept API minimal)
 
 # Utility function for getting user JWT token (for future implementation)
 def get_user_jwt_token(user_id):
@@ -249,17 +254,4 @@ def get_user_jwt_token(user_id):
     # This would involve calling Clerk API or your auth service
     pass
 
-# Health check function
-async def test_backend_connection(backend_url):
-    """Test connection to backend API"""
-    try:
-        response = requests.get(f"{backend_url}/ping", timeout=5)
-        return {
-            'success': response.status_code == 200,
-            'status_code': response.status_code
-        }
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        } 
+# Health check function (not used; removed to avoid extra dependency)

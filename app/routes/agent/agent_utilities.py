@@ -194,41 +194,66 @@ async def save_agent_content_to_db(project_id: int, learning_path: Dict[str, Any
             project.tech_stack = json.dumps(repo_info.get('tech_stack', {}))
             project.is_processed = True
             
-            # Save concepts
-            for concept_data in learning_path.get('concepts', []):
+            # Save concepts (support both 'concepts' list and day-specific keys like 'day_0_concepts')
+            concepts_payload = []
+            if 'concepts' in learning_path:
+                concepts_payload = learning_path.get('concepts', [])
+            else:
+                # Collect any day_*_concepts arrays
+                for key, value in learning_path.items():
+                    if isinstance(key, str) and key.endswith('_concepts') and isinstance(value, list):
+                        concepts_payload.extend(value)
+
+            for concept_data in concepts_payload:
                 concept = Concept(
                     project_id=project_id,
                     concept_external_id=concept_data['id'],
-                    name=concept_data['name'],
+                    title=concept_data.get('name') or concept_data.get('title', ''),
                     description=concept_data.get('description', ''),
-                    order=int(concept_data['id'].split('-')[1]),
+                    order=concept_data.get('order') if isinstance(concept_data.get('order'), int) else int(concept_data['id'].split('-')[-1]) if '-' in concept_data['id'] else 0,
                     is_unlocked=concept_data.get('isUnlocked', False)
                 )
                 session.add(concept)
                 await session.flush()  # Get the concept_id
                 
-                # Save subtopics
-                for subtopic_data in concept_data.get('subtopics', []):
+                # Support both 'subtopics' and 'subconcepts' structures
+                subcollections = []
+                if 'subtopics' in concept_data and isinstance(concept_data['subtopics'], list):
+                    subcollections = concept_data['subtopics']
+                elif 'subconcepts' in concept_data and isinstance(concept_data['subconcepts'], list):
+                    # Map subconcepts as subtopics to fit current UI/API surface
+                    subcollections = [
+                        {
+                            'id': sc.get('id', ''),
+                            'name': sc.get('name', ''),
+                            'description': sc.get('description', ''),
+                            'tasks': ([sc['task']] if isinstance(sc.get('task'), dict) else sc.get('tasks', [])) or [],
+                            'isUnlocked': sc.get('is_unlocked', False),
+                        }
+                        for sc in concept_data['subconcepts']
+                    ]
+
+                for subtopic_data in subcollections:
                     subtopic = Subtopic(
                         concept_id=concept.concept_id,
-                        subtopic_external_id=subtopic_data['id'],
-                        name=subtopic_data['name'],
+                        subtopic_external_id=subtopic_data.get('id', ''),
+                        name=subtopic_data.get('name', ''),
                         description=subtopic_data.get('description', ''),
-                        order=int(subtopic_data['id'].split('-')[2]),
+                        order=subtopic_data.get('order') if isinstance(subtopic_data.get('order'), int) else (int(subtopic_data.get('id', '0-0-0').split('-')[-1]) if '-' in subtopic_data.get('id', '') else 0),
                         is_unlocked=subtopic_data.get('isUnlocked', False)
                     )
                     session.add(subtopic)
                     await session.flush()
-                    
+
                     # Save tasks
                     for task_data in subtopic_data.get('tasks', []):
                         task = Task(
                             project_id=project_id,
                             subtopic_id=subtopic.subtopic_id,
-                            task_external_id=task_data['id'],
-                            title=task_data['name'],
+                            task_external_id=task_data.get('id', ''),
+                            title=task_data.get('name') or task_data.get('title', ''),
                             description=task_data.get('description', ''),
-                            order=int(task_data['id'].split('-')[3]),
+                            order=task_data.get('order') if isinstance(task_data.get('order'), int) else (int(task_data.get('id', '0-0-0-0').split('-')[-1]) if '-' in task_data.get('id', '') else 0),
                             difficulty=task_data.get('difficulty', 'medium'),
                             files_to_study=json.dumps(task_data.get('files_to_study', [])),
                             is_unlocked=task_data.get('isUnlocked', False)
@@ -405,16 +430,20 @@ async def clear_learning_path_for_project(project_id: int):
     """Clear entire learning path for project"""
     async with SessionLocal() as session:
         await session.execute(
-            text("DELETE FROM tasks WHERE subtopic_id IN (SELECT id FROM subtopics WHERE concept_id IN (SELECT id FROM concepts WHERE project_id = :project_id))"), 
-            {"project_id": project_id}
+            text(
+                "DELETE FROM tasks WHERE subtopic_id IN (SELECT subtopic_id FROM subtopics WHERE concept_id IN (SELECT concept_id FROM concepts WHERE project_id = :project_id))"
+            ),
+            {"project_id": project_id},
         )
         await session.execute(
-            text("DELETE FROM subtopics WHERE concept_id IN (SELECT id FROM concepts WHERE project_id = :project_id)"), 
-            {"project_id": project_id}
+            text(
+                "DELETE FROM subtopics WHERE concept_id IN (SELECT concept_id FROM concepts WHERE project_id = :project_id)"
+            ),
+            {"project_id": project_id},
         )
         await session.execute(
-            text("DELETE FROM concepts WHERE project_id = :project_id"), 
-            {"project_id": project_id}
+            text("DELETE FROM concepts WHERE project_id = :project_id"),
+            {"project_id": project_id},
         )
         await session.commit()
 

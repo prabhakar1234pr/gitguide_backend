@@ -51,39 +51,32 @@ class GitGuideAgent:
                     'error': error_msg
                 }
             print(f"✅ Repository analyzed: {repo_analysis['total_files']} files, {len(repo_analysis['tech_stack'])} technologies")
-            # Step 2: Generate brief project overview and Day 0 content
-            print("🧠 Step 2: Generating brief project overview and Day 0 content...")
-            day_0_content = await generate_day_content(
-                repo_analysis,
-                0,  # Day 0
-                skill_level,
-                domain,
-                None,  # No project overview for Day 0
-                self.azure_openai_config
-            )
-            if not day_0_content['success']:
-                return {
-                    'success': False,
-                    'error': f"Day 0 generation failed: {day_0_content['error']}"
-                }
-            print(f"🎯 Day 0 content generated with {len(day_0_content['concepts'])} concepts")
-            # Step 3: Save initial content to database (Day 0 only)
-            print("💾 Step 3: Saving Day 0 content to database...")
+            # Step 2: Generate a comprehensive project overview (and optional Day 1 draft) using LLM
+            print("🧠 Step 2: Generating project overview (and initial structure)...")
+            lp = await generate_learning_path(repo_analysis, skill_level, domain, self.azure_openai_config)
+            project_overview_text = ''
+            if lp and lp.get('success'):
+                project_overview_text = lp.get('project_overview', '') or ''
+            else:
+                print(f"⚠️ Learning path overview generation failed: {lp.get('error') if lp else 'unknown'}")
+
+            # Initialize days and save metadata + overview
+            print("💾 Initializing Day 0 + 14 days and saving overview/metadata...")
             save_result = await save_learning_content(
                 project_id,
                 {
-                    'project_overview': '',  # No overview for Day 0
-                    'day_0_concepts': day_0_content['concepts']
+                    'project_overview': project_overview_text
                 },
                 repo_analysis['repo_info']
             )
             if not save_result['success']:
                 return {
                     'success': False,
-                    'error': f"Failed to save Day 0 content: {save_result['error']}"
+                    'error': f"Failed to initialize project content: {save_result['error']}"
                 }
-            # Step 4: Start background generation for Day 1 (don't wait for completion)
-            print("🔄 Step 4: Starting background generation for Day 1...")
+
+            # Step 3: Start background generation for Day 1 (don't wait for completion)
+            print("🔄 Step 3: Starting background generation for Day 1...")
             asyncio.create_task(self.generate_next_day_background(
                 project_id, 1, repo_analysis, skill_level, domain, ''
             ))
@@ -91,7 +84,6 @@ class GitGuideAgent:
             return {
                 'success': True,
                 'project_id': project_id,
-                'day_0_concepts_generated': len(day_0_content['concepts']),
                 'repo_info': repo_analysis['repo_info'],
                 'day_1_generation_started': True
             }
@@ -150,17 +142,8 @@ class GitGuideAgent:
             
             print(f"✅ Background: Day {day_number} content saved successfully")
             
-            # If this isn't the last day, start generating the next day
-            if day_number < 14:
-                next_day = day_number + 1
-                print(f"🔄 Background: Scheduling Day {next_day} generation...")
-                # Add a small delay to prevent overwhelming the API
-                await asyncio.sleep(5)
-                asyncio.create_task(self.generate_next_day_background(
-                    project_id, next_day, repo_analysis, skill_level, domain, project_overview
-                ))
-            else:
-                print(f"🏁 Background: All days generated for project {project_id}")
+            # Do not pre-generate beyond next day; generation for day+1 will be triggered upon completion
+            print(f"ℹ️ Background: Day {day_number} ready in DB; awaiting unlock to trigger next day generation")
                 
         except Exception as e:
             print(f"❌ Background Day {day_number} generation error: {str(e)}")

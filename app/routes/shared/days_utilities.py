@@ -178,11 +178,18 @@ async def unlock_next_day(session: AsyncSession, project_id: int, current_day: i
                    COUNT(CASE WHEN t.is_completed = TRUE THEN 1 END) as completed_tasks
             FROM tasks t
             WHERE t.project_id = :project_id
-            AND EXISTS (
-                SELECT 1 FROM concepts c 
-                JOIN days d ON c.day_id = d.day_id 
-                WHERE c.concept_id = t.concept_id 
-                AND d.day_number = :current_day
+            AND (
+                EXISTS (
+                    SELECT 1 FROM concepts c 
+                    JOIN days d ON c.day_id = d.day_id 
+                    WHERE d.day_number = :current_day AND c.concept_id = t.concept_id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM subconcepts sc
+                    JOIN concepts c ON sc.concept_id = c.concept_id
+                    JOIN days d ON c.day_id = d.day_id
+                    WHERE d.day_number = :current_day AND sc.subconcept_id = t.subconcept_id
+                )
             )
         """), {'project_id': project_id, 'current_day': current_day})
         
@@ -200,32 +207,81 @@ async def unlock_next_day(session: AsyncSession, project_id: int, current_day: i
             
         print(f"✅ Day {current_day}: All {completed_tasks}/{total_tasks} tasks completed!")
     
-    # Check if next day is already unlocked
+    # Check if next day exists and whether it's unlocked
     result = await session.execute(text("""
         SELECT is_unlocked FROM days 
         WHERE project_id = :project_id AND day_number = :day_number
     """), {'project_id': project_id, 'day_number': next_day})
-    
     current_status = result.scalar_one_or_none()
-    
     if current_status is None:
         print(f"❌ Day {next_day} not found for project {project_id}")
         return False
-    
-    if current_status:
-        print(f"ℹ️ Day {next_day} already unlocked for project {project_id}")
-        return False
-    
-    # All tasks verified/completed - unlock next day
-    await session.execute(text("""
-        UPDATE days 
-        SET is_unlocked = TRUE 
-        WHERE project_id = :project_id AND day_number = :day_number
-    """), {'project_id': project_id, 'day_number': next_day})
-    
+
+    # Ensure day row is unlocked
+    if not current_status:
+        await session.execute(text(
+            """
+            UPDATE days 
+            SET is_unlocked = TRUE 
+            WHERE project_id = :project_id AND day_number = :day_number
+            """
+        ), {'project_id': project_id, 'day_number': next_day})
+
+    # Idempotently unlock concepts and subtopics for the day, and only first task per subtopic
+    try:
+        # Unlock all concepts for the day
+        await session.execute(text(
+            """
+            UPDATE concepts c
+            SET is_unlocked = TRUE
+            FROM days d
+            WHERE c.day_id = d.day_id AND d.project_id = :project_id AND d.day_number = :day_number
+            """
+        ), {'project_id': project_id, 'day_number': next_day})
+
+        # Unlock all subtopics for those concepts
+        await session.execute(text(
+            """
+            UPDATE subtopics s
+            SET is_unlocked = TRUE
+            WHERE s.concept_id IN (
+                SELECT c.concept_id FROM concepts c
+                JOIN days d ON d.day_id = c.day_id
+                WHERE d.project_id = :project_id AND d.day_number = :day_number
+            )
+            """
+        ), {'project_id': project_id, 'day_number': next_day})
+
+        # Unlock only the first task per subtopic; others remain locked
+        await session.execute(text(
+            """
+            WITH subtopic_first_tasks AS (
+                SELECT DISTINCT ON (t.subtopic_id) t.task_id
+                FROM tasks t
+                JOIN subtopics s ON s.subtopic_id = t.subtopic_id
+                JOIN concepts c ON c.concept_id = s.concept_id
+                JOIN days d ON d.day_id = c.day_id
+                WHERE d.project_id = :project_id AND d.day_number = :day_number
+                ORDER BY t.subtopic_id, t."order"
+            )
+            UPDATE tasks AS all_tasks
+            SET is_unlocked = CASE
+                WHEN all_tasks.task_id IN (SELECT task_id FROM subtopic_first_tasks) THEN TRUE
+                ELSE FALSE
+            END
+            WHERE all_tasks.subtopic_id IN (
+                SELECT s.subtopic_id FROM subtopics s
+                JOIN concepts c ON c.concept_id = s.concept_id
+                JOIN days d ON d.day_id = c.day_id
+                WHERE d.project_id = :project_id AND d.day_number = :day_number
+            );
+            """
+        ), {'project_id': project_id, 'day_number': next_day})
+    except Exception as _:
+        pass
+
     await session.commit()
-    print(f"🔓 UNLOCKED Day {next_day} for project {project_id} (all Day {current_day} tasks verified)")
-    
+    print(f"🔓 Ensured Day {next_day} content unlocked for project {project_id}")
     return True
 
 async def mark_day_completed(session: AsyncSession, project_id: int, day_number: int) -> bool:
@@ -277,11 +333,18 @@ async def mark_day_completed(session: AsyncSession, project_id: int, day_number:
                    COUNT(CASE WHEN t.is_completed = TRUE THEN 1 END) as completed_tasks
             FROM tasks t
             WHERE t.project_id = :project_id
-            AND EXISTS (
-                SELECT 1 FROM concepts c 
-                JOIN days d ON c.day_id = d.day_id 
-                WHERE c.concept_id = t.concept_id 
-                AND d.day_number = :day_number
+            AND (
+                EXISTS (
+                    SELECT 1 FROM concepts c 
+                    JOIN days d ON c.day_id = d.day_id 
+                    WHERE d.day_number = :day_number AND c.concept_id = t.concept_id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM subconcepts sc
+                    JOIN concepts c ON sc.concept_id = c.concept_id
+                    JOIN days d ON c.day_id = d.day_id
+                    WHERE d.day_number = :day_number AND sc.subconcept_id = t.subconcept_id
+                )
             )
         """), {'project_id': project_id, 'day_number': day_number})
         
@@ -312,6 +375,18 @@ async def mark_day_completed(session: AsyncSession, project_id: int, day_number:
     # Try to unlock next day
     await unlock_next_day(session, project_id, day_number)
     
+    # If next day exists and hasn't generated content yet, mark content_generation_started for visibility
+    try:
+        await session.execute(text(
+            """
+            UPDATE days
+            SET content_generation_started = TRUE
+            WHERE project_id = :project_id AND day_number = :next_day
+            """
+        ), {'project_id': project_id, 'next_day': day_number + 1})
+    except Exception:
+        pass
+
     return True
 
 async def get_project_days(session: AsyncSession, project_id: int) -> List[Dict[str, Any]]:
@@ -451,22 +526,17 @@ async def verify_day0_repository(session: AsyncSession, project_id: int, repo_ur
         repo_data = response.json()
         
         # Update Day 0 with verification
+        # Do NOT mark day completed or unlock Day 1 here.
+        # Task-level verification endpoints will mark tasks verified and trigger unlocks when ALL are done.
         await session.execute(text("""
             UPDATE days 
-            SET verification_repo_url = :repo_url, is_verified = TRUE, is_completed = TRUE
+            SET verification_repo_url = :repo_url, is_verified = TRUE
             WHERE project_id = :project_id AND day_number = 0
         """), {'project_id': project_id, 'repo_url': repo_url})
         
-        # Unlock Day 1
-        await session.execute(text("""
-            UPDATE days 
-            SET is_unlocked = TRUE 
-            WHERE project_id = :project_id AND day_number = 1
-        """), {'project_id': project_id})
-        
         await session.commit()
         
-        print(f"✅ Day 0 verified for project {project_id}, Day 1 unlocked")
+        print(f"✅ Day 0 verified for project {project_id} (no auto-unlock; will unlock after all Day 0 tasks verified)")
         
         return {
             'success': True,

@@ -30,7 +30,7 @@ async def update_task_completion(session: AsyncSession, project_id: int, task_id
         # Get task details to find subconcept and concept
         task_result = await session.execute(
             text("""
-                SELECT t.subconcept_id, t.concept_id, sc.concept_id as sc_concept_id, c.day_id
+                SELECT t.subconcept_id, t.concept_id, sc.concept_id as sc_concept_id, c.day_id, t.subtopic_id, t."order"
                 FROM tasks t 
                 LEFT JOIN subconcepts sc ON t.subconcept_id = sc.subconcept_id
                 LEFT JOIN concepts c ON COALESCE(sc.concept_id, t.concept_id) = c.concept_id
@@ -46,6 +46,8 @@ async def update_task_completion(session: AsyncSession, project_id: int, task_id
         subconcept_id = task_info[0]
         concept_id = task_info[1] or task_info[2]
         day_id = task_info[3]
+        subtopic_id = task_info[4]
+        current_order = task_info[5] or 0
         
         progress_updates = {
             'subconcept_completed': False,
@@ -61,12 +63,13 @@ async def update_task_completion(session: AsyncSession, project_id: int, task_id
             if subconcept_completed:
                 await mark_subconcept_completed(session, subconcept_id)
                 progress_updates['subconcept_completed'] = True
-                
-                # Check if concept is completed
-                concept_completed = await check_concept_completion(session, concept_id)
-                if concept_completed:
-                    await mark_concept_completed(session, concept_id)
-                    progress_updates['concept_completed'] = True
+
+        # Always check if the concept is completed (covers both subconcept and direct concept tasks)
+        if concept_id:
+            concept_completed = await check_concept_completion(session, concept_id)
+            if concept_completed:
+                await mark_concept_completed(session, concept_id)
+                progress_updates['concept_completed'] = True
         
         # Check if day is completed
         if day_id:
@@ -78,6 +81,49 @@ async def update_task_completion(session: AsyncSession, project_id: int, task_id
                 # Try to unlock next day
                 next_day_unlocked = await unlock_next_day(session, project_id, day_id)
                 progress_updates['next_day_unlocked'] = next_day_unlocked
+
+        # Sequentially unlock the next task in the same subtopic (or direct concept tasks for Day 0)
+        try:
+            if subtopic_id is not None:
+                # Unlock next task within the same subtopic
+                next_task_res = await session.execute(
+                    text(
+                        """
+                        SELECT t2.task_id FROM tasks t2
+                        WHERE t2.subtopic_id = :subtopic_id AND t2."order" > :current_order
+                        ORDER BY t2."order" ASC
+                        LIMIT 1
+                        """
+                    ),
+                    {"subtopic_id": subtopic_id, "current_order": current_order}
+                )
+                row = next_task_res.fetchone()
+                if row and row[0]:
+                    await session.execute(
+                        text("UPDATE tasks SET is_unlocked = TRUE WHERE task_id = :next_task_id"),
+                        {"next_task_id": row[0]}
+                    )
+            elif concept_id is not None and subtopic_id is None and day_id is not None:
+                # Day 0 style direct concept tasks: unlock next direct task under the same concept
+                next_task_res = await session.execute(
+                    text(
+                        """
+                        SELECT t2.task_id FROM tasks t2
+                        WHERE t2.concept_id = :concept_id AND t2.subtopic_id IS NULL AND t2."order" > :current_order
+                        ORDER BY t2."order" ASC
+                        LIMIT 1
+                        """
+                    ),
+                    {"concept_id": concept_id, "current_order": current_order}
+                )
+                row = next_task_res.fetchone()
+                if row and row[0]:
+                    await session.execute(
+                        text("UPDATE tasks SET is_unlocked = TRUE WHERE task_id = :next_task_id"),
+                        {"next_task_id": row[0]}
+                    )
+        except Exception as _:
+            pass
         
         # Update progress percentages
         progress_updates['progress_percentages'] = await calculate_all_progress(session, project_id)
@@ -119,9 +165,10 @@ async def check_subconcept_completion(session: AsyncSession, subconcept_id: int)
         return False
 
 async def check_concept_completion(session: AsyncSession, concept_id: int) -> bool:
-    """Check if all subconcepts in a concept are completed"""
+    """Check if all subconcepts and tasks in a concept are completed"""
     try:
-        result = await session.execute(
+        # Check subconcepts completion
+        subconcepts_result = await session.execute(
             text("""
                 SELECT COUNT(*) as total_subconcepts, 
                        COUNT(CASE WHEN is_completed = TRUE THEN 1 END) as completed_subconcepts
@@ -130,26 +177,50 @@ async def check_concept_completion(session: AsyncSession, concept_id: int) -> bo
             """),
             {'concept_id': concept_id}
         )
+        subconcepts_counts = subconcepts_result.fetchone()
+        total_subconcepts = subconcepts_counts[0] if subconcepts_counts else 0
+        completed_subconcepts = subconcepts_counts[1] if subconcepts_counts else 0
         
-        counts = result.fetchone()
-        total_subconcepts = counts[0] if counts else 0
-        completed_subconcepts = counts[1] if counts else 0
-        
-        return total_subconcepts > 0 and completed_subconcepts == total_subconcepts
+        if total_subconcepts > 0 and completed_subconcepts != total_subconcepts:
+            return False # Not all subconcepts are done
+            
+        # Check standalone tasks completion (tasks directly under the concept)
+        tasks_result = await session.execute(
+            text("""
+                SELECT COUNT(*) as total_tasks, 
+                       COUNT(CASE WHEN is_completed = TRUE THEN 1 END) as completed_tasks
+                FROM tasks 
+                WHERE concept_id = :concept_id AND subconcept_id IS NULL
+            """),
+            {'concept_id': concept_id}
+        )
+        tasks_counts = tasks_result.fetchone()
+        total_tasks = tasks_counts[0] if tasks_counts else 0
+        completed_tasks = tasks_counts[1] if tasks_counts else 0
+
+        if total_tasks > 0 and completed_tasks != total_tasks:
+            return False # Not all standalone tasks are done
+
+        # If there are no subconcepts, there must be tasks to be considered completable
+        if total_subconcepts == 0 and total_tasks == 0:
+            return False
+
+        return True
         
     except Exception as e:
         print(f"❌ Error checking concept completion: {str(e)}")
         return False
 
 async def check_day_completion(session: AsyncSession, day_id: int) -> bool:
-    """Check if all concepts in a day are completed"""
+    """Check if all concepts and their tasks/subconcepts in a day are completed"""
     try:
         result = await session.execute(
             text("""
-                SELECT COUNT(*) as total_concepts, 
-                       COUNT(CASE WHEN is_completed = TRUE THEN 1 END) as completed_concepts
-                FROM concepts 
-                WHERE day_id = :day_id
+                SELECT 
+                    COUNT(DISTINCT c.concept_id) as total_concepts, 
+                    COUNT(DISTINCT CASE WHEN c.is_completed = TRUE THEN c.concept_id END) as completed_concepts
+                FROM concepts c
+                WHERE c.day_id = :day_id
             """),
             {'day_id': day_id}
         )
@@ -216,7 +287,8 @@ async def unlock_next_day(session: AsyncSession, project_id: int, current_day_id
         current_day_number = day_info[0]
         next_day_number = current_day_number + 1
         
-        # Check if next day exists and unlock it
+        # Check if next day exists and unlock it. When unlocking a day, keep all tasks initially locked
+        # except the first task in each subtopic (or the first direct task for day 0 structure).
         next_day_result = await session.execute(
             text("""
                 UPDATE days 
@@ -235,6 +307,59 @@ async def unlock_next_day(session: AsyncSession, project_id: int, current_day_id
                 text("UPDATE projects SET current_day = :next_day_number WHERE project_id = :project_id"),
                 {'project_id': project_id, 'next_day_number': next_day_number}
             )
+
+            # Sequentially unlock only the first task per subtopic for the newly unlocked day
+            try:
+                # Unlock all concepts for the day
+                await session.execute(text(
+                    """
+                    UPDATE concepts c
+                    SET is_unlocked = TRUE
+                    FROM days d
+                    WHERE c.day_id = d.day_id AND d.project_id = :project_id AND d.day_number = :next_day_number
+                    """
+                ), {'project_id': project_id, 'next_day_number': next_day_number})
+
+                # Unlock all subtopics for those concepts
+                await session.execute(text(
+                    """
+                    UPDATE subtopics s
+                    SET is_unlocked = TRUE
+                    WHERE s.concept_id IN (
+                        SELECT c.concept_id FROM concepts c
+                        JOIN days d ON d.day_id = c.day_id
+                        WHERE d.project_id = :project_id AND d.day_number = :next_day_number
+                    )
+                    """
+                ), {'project_id': project_id, 'next_day_number': next_day_number})
+
+                await session.execute(text(
+                    """
+                    WITH subtopic_first_tasks AS (
+                        SELECT DISTINCT ON (t.subtopic_id) t.task_id
+                        FROM tasks t
+                        JOIN subtopics s ON s.subtopic_id = t.subtopic_id
+                        JOIN concepts c ON c.concept_id = s.concept_id
+                        JOIN days d ON d.day_id = c.day_id
+                        WHERE d.project_id = :project_id AND d.day_number = :next_day_number
+                        ORDER BY t.subtopic_id, t."order"
+                    )
+                    UPDATE tasks AS all_tasks
+                    SET is_unlocked = CASE
+                        WHEN all_tasks.task_id IN (SELECT task_id FROM subtopic_first_tasks) THEN TRUE
+                        ELSE FALSE
+                    END
+                    WHERE all_tasks.subtopic_id IN (
+                        SELECT s.subtopic_id FROM subtopics s
+                        JOIN concepts c ON c.concept_id = s.concept_id
+                        JOIN days d ON d.day_id = c.day_id
+                        WHERE d.project_id = :project_id AND d.day_number = :next_day_number
+                    );
+                    """
+                ), {'project_id': project_id, 'next_day_number': next_day_number})
+            except Exception as _:
+                # best-effort; do not fail unlock
+                pass
             
             print(f"✅ Day {next_day_number} unlocked for project {project_id}")
             return True

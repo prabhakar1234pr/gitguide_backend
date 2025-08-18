@@ -59,7 +59,16 @@ async def get_project_full_context(project_id: int, user_id: str):
         concepts_result = await session.execute(
             select(Concept).filter(Concept.project_id == project_id).order_by(Concept.order)
         )
-        concepts = concepts_result.scalars().all()
+        all_concepts = concepts_result.scalars().all()
+        # Filter: only include concepts for unlocked days
+        concepts = []
+        from app.database_models import Day
+        for concept in all_concepts:
+            if concept.day_id:
+                day_res = await session.execute(select(Day).filter(Day.day_id == concept.day_id))
+                day = day_res.scalar_one_or_none()
+                if day and day.is_unlocked:
+                    concepts.append(concept)
         
         learning_path = []
         current_task = None

@@ -228,14 +228,59 @@ async def unlock_day_endpoint(
         if day_number < 0 or day_number > 14:
             raise HTTPException(status_code=400, detail="Day number must be between 0 and 14")
         
-        # This is a simplified unlock - doesn't check prerequisites
         from sqlalchemy import text
+        # Unlock the day
         await db.execute(text("""
             UPDATE days 
             SET is_unlocked = TRUE 
             WHERE project_id = :project_id AND day_number = :day_number
         """), {'project_id': project_id, 'day_number': day_number})
-        
+
+        # Unlock all concepts for the day
+        await db.execute(text("""
+            UPDATE concepts c
+            SET is_unlocked = TRUE
+            FROM days d
+            WHERE c.day_id = d.day_id AND d.project_id = :project_id AND d.day_number = :day_number
+        """), {'project_id': project_id, 'day_number': day_number})
+
+        # Unlock all subtopics for those concepts
+        await db.execute(text("""
+            UPDATE subtopics s
+            SET is_unlocked = TRUE
+            WHERE s.concept_id IN (
+                SELECT c.concept_id FROM concepts c
+                JOIN days d ON d.day_id = c.day_id
+                WHERE d.project_id = :project_id AND d.day_number = :day_number
+            )
+        """), {'project_id': project_id, 'day_number': day_number})
+
+        # Ensure only the first task per subtopic starts unlocked; others locked until progression
+        await db.execute(text(
+            """
+            WITH subtopic_first_tasks AS (
+                SELECT DISTINCT ON (t.subtopic_id) t.task_id
+                FROM tasks t
+                JOIN subtopics s ON s.subtopic_id = t.subtopic_id
+                JOIN concepts c ON c.concept_id = s.concept_id
+                JOIN days d ON d.day_id = c.day_id
+                WHERE d.project_id = :project_id AND d.day_number = :day_number
+                ORDER BY t.subtopic_id, t."order"
+            )
+            UPDATE tasks AS all_tasks
+            SET is_unlocked = CASE
+                WHEN all_tasks.task_id IN (SELECT task_id FROM subtopic_first_tasks) THEN TRUE
+                ELSE FALSE
+            END
+            WHERE all_tasks.subtopic_id IN (
+                SELECT s.subtopic_id FROM subtopics s
+                JOIN concepts c ON c.concept_id = s.concept_id
+                JOIN days d ON d.day_id = c.day_id
+                WHERE d.project_id = :project_id AND d.day_number = :day_number
+            );
+            """
+        ), {'project_id': project_id, 'day_number': day_number})
+
         await db.commit()
         
         return {
