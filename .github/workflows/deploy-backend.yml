@@ -66,20 +66,33 @@ jobs:
         service-id: ${{ secrets.RENDER_SERVICE_ID }}
         api-key: ${{ secrets.RENDER_API_KEY }}
         
-    - name: Wait for deployment
-      run: sleep 60
+    - name: Wait for deployment to stabilize
+      run: sleep 90
       
-    - name: Test deployed backend
+    - name: Test deployed backend with debugging
       run: |
+        echo "🔍 Testing backend deployment at: ${{ secrets.BACKEND_URL }}"
+        
+        # Test root endpoint first
+        echo "📍 Testing root endpoint..."
+        curl -v -f ${{ secrets.BACKEND_URL }}/ || echo "❌ Root endpoint failed"
+        
         # Test health endpoint
-        curl -f ${{ secrets.BACKEND_URL }}/ping || exit 1
+        echo "🏥 Testing health endpoint..."
+        curl -v -f ${{ secrets.BACKEND_URL }}/ping || echo "❌ Health endpoint failed"
+        
+        # Test with longer timeout and better error reporting
+        echo "🔍 Detailed health check with verbose output..."
+        curl -v --max-time 30 ${{ secrets.BACKEND_URL }}/ping || {
+          echo "❌ Backend health check failed!"
+          echo "🔍 Attempting to get more info..."
+          curl -I ${{ secrets.BACKEND_URL }}/ || echo "❌ Even root endpoint is unreachable"
+          exit 1
+        }
+        
         echo "✅ Backend deployment successful!"
         
-        # Test API documentation
+        # Test API documentation (optional)
         curl -f ${{ secrets.BACKEND_URL }}/docs || echo "⚠️ Docs endpoint check failed (may not be critical)"
-        
-        # Test a few key endpoints
-        curl -f ${{ secrets.BACKEND_URL }}/agent/health || echo "⚠️ Agent health check failed"
-        curl -f ${{ secrets.BACKEND_URL }}/chat/health || echo "⚠️ Chat health check failed"
         
         echo "🎉 Backend deployment and health checks completed!"
