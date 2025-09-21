@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: gitguide-backend
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.api_server:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: PORT
+        generateValue: true
+    autoDeploy: false
+
+databases:
+  - name: gitguide-postgres
+    plan: free
+    databaseName: gitguide_db
+    user: gitguide_user
