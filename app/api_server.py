@@ -52,21 +52,15 @@ app = FastAPI(
 
 # Configure CORS - Production ready with environment-based origins
 import os
-allowed_origins = [
-    "http://localhost:3000",  # Local development
-    "https://*.vercel.app",   # Vercel deployments
-    "https://gitguide.vercel.app",  # Your production domain
-]
-
-# Add custom domain if provided
-if custom_origin := os.getenv("FRONTEND_URL"):
-    allowed_origins.append(custom_origin)
+# For debugging - temporarily allow all origins
+# TODO: Restrict this to specific domains after fixing the connection
+allowed_origins = ["*"]  # Temporarily allow all origins for debugging
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
