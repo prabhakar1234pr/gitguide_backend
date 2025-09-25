@@ -22,6 +22,8 @@ from app.routes.shared.days_utilities import (
     get_day0_verification_status,
     verify_github_profile,
     verify_repository_creation_task,
+    verify_file_creation_task,
+    verify_readme_update_task,
     verify_commit_task
 )
 
@@ -449,6 +451,92 @@ async def verify_task_endpoint(
     except Exception as e:
         print(f"❌ Error verifying task {task_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to verify task: {str(e)}")
+
+@router.post("/projects/{project_id}/tasks/auto-verify")
+async def auto_verify_tasks_endpoint(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(None)
+):
+    """Automatically verify all tasks that can be verified via GitHub API"""
+    try:
+        print(f"🔍 Starting auto-verification for project {project_id}")
+        
+        # Get user repository URL from Day 0 verification
+        result = await db.execute(text("""
+            SELECT verification_repo_url FROM days 
+            WHERE project_id = :project_id AND day_number = 0
+        """), {'project_id': project_id})
+        
+        repo_url = result.scalar_one_or_none()
+        if not repo_url:
+            return {
+                "success": False,
+                "error": "Repository not found. Please complete Day 0 repository verification first."
+            }
+        
+        # Extract username and repo name
+        parts = repo_url.replace('https://github.com/', '').strip('/').split('/')
+        if len(parts) != 2:
+            return {
+                "success": False,
+                "error": "Invalid repository URL format"
+            }
+        
+        username, repo_name = parts
+        
+        # Get all unverified tasks with verification types
+        result = await db.execute(text("""
+            SELECT t.task_id, t.verification_type, t.title, t.description
+            FROM tasks t
+            WHERE t.project_id = :project_id 
+            AND t.verification_type IS NOT NULL
+            AND t.is_verified = FALSE
+            AND t.verification_type != 'manual'
+            ORDER BY t.order
+        """), {'project_id': project_id})
+        
+        unverified_tasks = result.fetchall()
+        verification_results = []
+        
+        for task_row in unverified_tasks:
+            task_id, verification_type, title, description = task_row
+            
+            print(f"🔍 Auto-verifying task {task_id}: {title} (type: {verification_type})")
+            
+            # Route to appropriate verification based on type
+            if verification_type == 'commit_verification':
+                # Check for recent commits
+                verification_result = await verify_commit_task(db, project_id, task_id)
+            elif verification_type == 'file_creation':
+                # Check if specific files exist in repository
+                verification_result = await verify_file_creation_task(db, project_id, task_id, username, repo_name)
+            elif verification_type == 'readme_update':
+                # Check if README was updated
+                verification_result = await verify_readme_update_task(db, project_id, task_id, username, repo_name)
+            else:
+                # Skip tasks that require manual input
+                continue
+            
+            verification_results.append({
+                'task_id': task_id,
+                'title': title,
+                'verification_type': verification_type,
+                'result': verification_result
+            })
+        
+        verified_count = sum(1 for r in verification_results if r['result']['success'])
+        
+        return {
+            "success": True,
+            "message": f"Auto-verification completed. {verified_count}/{len(verification_results)} tasks verified.",
+            "repository": f"{username}/{repo_name}",
+            "verification_results": verification_results
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in auto-verification: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Auto-verification failed: {str(e)}")
 
 @router.get("/projects/{project_id}/days/0/debug")
 async def debug_day0_status_endpoint(

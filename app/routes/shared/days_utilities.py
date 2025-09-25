@@ -1336,6 +1336,256 @@ async def unlock_next_day0_task(session: AsyncSession, project_id: int, complete
         await session.rollback()
         return False 
 
+async def verify_file_creation_task(session: AsyncSession, project_id: int, task_id: int, username: str, repo_name: str) -> Dict[str, Any]:
+    """
+    Verify that specific files were created in the repository
+    
+    Args:
+        session: Database session
+        project_id: ID of the project
+        task_id: ID of the task
+        username: GitHub username
+        repo_name: GitHub repository name
+    
+    Returns:
+        Dictionary with verification result
+    """
+    import requests
+    import os
+    import json
+    
+    try:
+        # Get task details to see what files should be checked
+        result = await session.execute(text("""
+            SELECT description, verification_data FROM tasks 
+            WHERE task_id = :task_id
+        """), {'task_id': task_id})
+        
+        task_data = result.fetchone()
+        if not task_data:
+            return {
+                'success': False,
+                'error': 'Task not found'
+            }
+        
+        description = task_data[0]
+        verification_data = task_data[1]
+        
+        # Parse verification data to get expected files
+        expected_files = []
+        if verification_data:
+            try:
+                data = json.loads(verification_data)
+                expected_files = data.get('files', [])
+            except:
+                # If no JSON data, try to extract from description
+                if 'README.md' in description:
+                    expected_files = ['README.md']
+                elif '.py' in description:
+                    expected_files = ['main.py', 'app.py', '*.py']
+                elif '.js' in description:
+                    expected_files = ['index.js', 'app.js', '*.js']
+        
+        if not expected_files:
+            # Default check for common files
+            expected_files = ['README.md']
+        
+        # Use GitHub API to check repository contents
+        github_token = os.getenv('GITHUB_ACCESS_TOKEN')
+        headers = {}
+        if github_token:
+            headers['Authorization'] = f'token {github_token}'
+        
+        api_url = f'https://api.github.com/repos/{username}/{repo_name}/contents'
+        response = requests.get(api_url, headers=headers, timeout=10)
+        
+        if response.status_code == 404:
+            return {
+                'success': False,
+                'error': 'Repository not found or not accessible'
+            }
+        elif response.status_code != 200:
+            return {
+                'success': False,
+                'error': f'Failed to access repository contents (Status: {response.status_code})'
+            }
+        
+        contents = response.json()
+        found_files = [item['name'] for item in contents if item['type'] == 'file']
+        
+        # Check if expected files exist
+        verified_files = []
+        missing_files = []
+        
+        for expected_file in expected_files:
+            if expected_file in found_files:
+                verified_files.append(expected_file)
+            elif expected_file.startswith('*'):
+                # Wildcard check
+                extension = expected_file[1:]
+                matching_files = [f for f in found_files if f.endswith(extension)]
+                if matching_files:
+                    verified_files.extend(matching_files)
+                else:
+                    missing_files.append(expected_file)
+            else:
+                missing_files.append(expected_file)
+        
+        if missing_files:
+            return {
+                'success': False,
+                'error': f'Missing required files: {", ".join(missing_files)}'
+            }
+        
+        # Update task verification
+        await session.execute(text("""
+            UPDATE tasks 
+            SET verification_data = :verification_data, is_verified = TRUE, is_completed = TRUE
+            WHERE task_id = :task_id
+        """), {
+            'task_id': task_id,
+            'verification_data': json.dumps({
+                'expected_files': expected_files,
+                'found_files': verified_files,
+                'repository': f'{username}/{repo_name}',
+                'verified_at': None  # Will be set by database
+            })
+        })
+        
+        await session.commit()
+        
+        print(f"✅ File creation verified for task {task_id}: {verified_files}")
+        
+        return {
+            'success': True,
+            'message': f'File creation verified successfully! Found: {", ".join(verified_files)}',
+            'file_info': {
+                'expected_files': expected_files,
+                'found_files': verified_files,
+                'repository': f'{username}/{repo_name}'
+            }
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'success': False,
+            'error': f'Failed to connect to GitHub API: {str(e)}'
+        }
+    except Exception as e:
+        await session.rollback()
+        return {
+            'success': False,
+            'error': f'File verification failed: {str(e)}'
+        }
+
+async def verify_readme_update_task(session: AsyncSession, project_id: int, task_id: int, username: str, repo_name: str) -> Dict[str, Any]:
+    """
+    Verify that README.md was updated with specific content
+    
+    Args:
+        session: Database session
+        project_id: ID of the project
+        task_id: ID of the task
+        username: GitHub username
+        repo_name: GitHub repository name
+    
+    Returns:
+        Dictionary with verification result
+    """
+    import requests
+    import os
+    import json
+    import base64
+    
+    try:
+        # Use GitHub API to get README content
+        github_token = os.getenv('GITHUB_ACCESS_TOKEN')
+        headers = {}
+        if github_token:
+            headers['Authorization'] = f'token {github_token}'
+        
+        api_url = f'https://api.github.com/repos/{username}/{repo_name}/contents/README.md'
+        response = requests.get(api_url, headers=headers, timeout=10)
+        
+        if response.status_code == 404:
+            return {
+                'success': False,
+                'error': 'README.md not found in repository'
+            }
+        elif response.status_code != 200:
+            return {
+                'success': False,
+                'error': f'Failed to access README.md (Status: {response.status_code})'
+            }
+        
+        readme_data = response.json()
+        
+        # Decode base64 content
+        content = base64.b64decode(readme_data['content']).decode('utf-8')
+        
+        # Check if README has meaningful content (not just default)
+        required_content = [
+            'project',
+            'description',
+            'installation',
+            'usage'
+        ]
+        
+        content_lower = content.lower()
+        found_sections = []
+        
+        for section in required_content:
+            if section in content_lower:
+                found_sections.append(section)
+        
+        # README must have at least 2 sections and be longer than 100 characters
+        if len(found_sections) < 2 or len(content.strip()) < 100:
+            return {
+                'success': False,
+                'error': f'README.md needs more content. Found: {", ".join(found_sections)}. Add project description, installation, and usage instructions.'
+            }
+        
+        # Update task verification
+        await session.execute(text("""
+            UPDATE tasks 
+            SET verification_data = :verification_data, is_verified = TRUE, is_completed = TRUE
+            WHERE task_id = :task_id
+        """), {
+            'task_id': task_id,
+            'verification_data': json.dumps({
+                'readme_length': len(content),
+                'found_sections': found_sections,
+                'repository': f'{username}/{repo_name}',
+                'verified_at': None  # Will be set by database
+            })
+        })
+        
+        await session.commit()
+        
+        print(f"✅ README update verified for task {task_id}")
+        
+        return {
+            'success': True,
+            'message': f'README.md verified successfully! Found sections: {", ".join(found_sections)}',
+            'readme_info': {
+                'length': len(content),
+                'sections': found_sections,
+                'repository': f'{username}/{repo_name}'
+            }
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'success': False,
+            'error': f'Failed to connect to GitHub API: {str(e)}'
+        }
+    except Exception as e:
+        await session.rollback()
+        return {
+            'success': False,
+            'error': f'README verification failed: {str(e)}'
+        }
+
 async def get_day_verification_status(session: AsyncSession, project_id: int, day_number: int) -> Dict[str, Any]:
     """
     Get detailed verification status for a specific day
