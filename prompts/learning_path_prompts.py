@@ -60,7 +60,7 @@ Create a GitGuide learning structure with:
 
 2. LEARNING STRUCTURE: Break down the learning journey into rich concepts. Each concept MUST have a detailed multi-sentence description (4-6 sentences) that teaches the idea before tasks. For each concept, create MANY subconcepts (at least 3-5) with clear 2-3 sentence descriptions.
 
-3. TASKS: For each subconcept, create MULTIPLE tasks (at least 2-4). Tasks must be detailed step-by-step (5-10 sentences), specific, actionable, and must reference actual files, functions, or code patterns from this repository. Never include code. The AI should teach first, then ask the user to apply.
+3. TASKS: For each subconcept, create MULTIPLE hands-on implementation tasks (at least 2-4). Every task MUST require creating, modifying, or organizing actual files in the repository and be verifiable via GitHub API. Tasks must include detailed step-by-step instructions (8-15 sentences) with specific file names, directory structures, and commit requirements. Include clear acceptance criteria for automatic verification. Never include code - focus on what to implement, not how.
 
 IMPORTANT REQUIREMENTS:
 - Descriptions (project overview, concept, subconcept) must be detailed and instructional (not one-liners).
@@ -87,11 +87,16 @@ RESPONSE FORMAT (JSON ONLY):
                     "description": "2-3 sentence explanation of the specific angle covered by this subconcept.",
                     "task": {{
                         "id": "task-0-0-0",
-                        "name": "Specific, actionable task referencing actual files (no code)",
-                        "description": "Detailed, step-by-step task (5-10 sentences) with specific file references and clear acceptance criteria. No code.",
+                        "name": "Specific implementation task (e.g., 'Create User Profile Component')",
+                        "description": "Detailed implementation guide (8-15 sentences): 1) Create specific file(s) with exact names 2) Implement required functionality 3) Add imports/exports 4) Include validation/error handling 5) Add styling 6) Test implementation 7) Commit with specific message. Include clear acceptance criteria for automatic verification.",
                         "files_to_study": ["actual/file/path.js", "another/file.py"],
                         "difficulty": "easy|medium|hard",
-                        "verification_type": "github_api"
+                        "verification_type": "file_creation|commit_verification|readme_update|directory_structure|code_implementation",
+                        "verification_criteria": {{
+                            "required_files": ["src/components/UserProfile.js"],
+                            "file_content_patterns": ["export default", "useState"],
+                            "commit_message_pattern": "Add user profile component"
+                        }}
                     }}
                 }}
             ]
@@ -478,13 +483,32 @@ PROJECT OVERVIEW CONTEXT:
 KEY FILES CONTENT:{file_contents_text}
 
 TASK:
-Generate Day {day_number} content as a detailed step-by-step journey. Aim for 6-8 concepts for the day, each with 3-6 subconcepts, and each subconcept with 2-4 tasks. Each concept MUST include a detailed 4-6 sentence description. Each subconcept MUST include a clear 2-3 sentence description. For each task, write 5-10 sentence, step-by-step instructions referencing actual files/modules from the repository. Never include code.
+Generate Day {day_number} content that consists of practical, hands-on GitHub-based tasks. Every task MUST be verifiable through GitHub API by checking actual code changes, file creation, or commit activity. Aim for 6-8 concepts for the day, each with 3-6 subconcepts, and each subconcept with 2-4 tasks.
 
-IMPORTANT REQUIREMENTS:
-- Descriptions must be detailed and instructional (not one-liners).
-- Tasks must be specific, actionable, step-by-step, with file references; no code.
-- Keep progression coherent and repo-aware.
-- Output ONLY valid JSON; no markdown or extra text.
+TASK REQUIREMENTS - EVERY TASK MUST:
+1. Require the user to create, modify, or organize actual files in their repository
+2. Be verifiable via GitHub API (file creation, commits, specific file content)
+3. Have detailed step-by-step instructions (8-15 sentences) with specific outcomes
+4. Reference actual files/folders from the repository 
+5. Include clear acceptance criteria that can be checked programmatically
+6. Build upon previous tasks progressively
+7. Include specific file names, directory structures, or code patterns to implement
+
+VERIFICATION TYPES TO USE:
+- "file_creation": Task requires creating specific files (index.html, main.py, config.json, etc.)
+- "commit_verification": Task requires making commits with specific patterns or messages
+- "readme_update": Task requires updating README.md with specific sections
+- "directory_structure": Task requires organizing files into specific folder structures
+- "code_implementation": Task requires implementing specific functions or features
+
+EXAMPLE TASK STRUCTURE:
+Instead of: "Review the authentication system"
+Create: "Implement User Registration Form Component - Create a new file `components/UserRegistration.js` with form fields for username, email, and password. Include form validation, error handling, and styling. The component should export a default function and include proper prop types. Test the component by importing it into `App.js` and adding it to the main render method. Commit your changes with the message 'Add user registration form component'."
+
+CONTENT DEPTH REQUIREMENTS:
+- Each concept: 6-8 sentences explaining the technical concept with repository context
+- Each subconcept: 3-4 sentences describing the specific implementation aspect
+- Each task: 8-15 sentences with detailed implementation steps, file specifications, and commit requirements
 
 CRITICAL: You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text. Your response must start with {{ and end with }}. Nothing else.
 
@@ -494,20 +518,25 @@ RESPONSE FORMAT (JSON ONLY):
     "concepts": [
         {{
             "id": "day{day_number}-concept-0",
-            "name": "Concept name",
-            "description": "Detailed 4-6 sentence description teaching this concept; mention repo files/modules when relevant.",
+            "name": "Concept name (e.g., 'Component Architecture and State Management')",
+            "description": "Detailed 6-8 sentence explanation of the concept, how it relates to this specific repository, which files demonstrate this pattern, and why it's important for this project. Include references to actual files and folders in the repository.",
             "subconcepts": [
                 {{
                     "id": "day{day_number}-subconcept-0-0",
-                    "name": "Subconcept name",
-                    "description": "2-3 sentence description of the specific topic",
+                    "name": "Subconcept name (e.g., 'Creating Reusable Form Components')",
+                    "description": "3-4 sentence description explaining this specific implementation aspect, referencing actual files in the repository where this pattern is used or should be implemented.",
                     "task": {{
                         "id": "day{day_number}-task-0-0-0",
-                        "name": "Specific, actionable task referencing actual files (no code)",
-                        "description": "Step-by-step (5-10 sentences) task with concrete file references and acceptance criteria. No code.",
-                        "files_to_study": ["actual/file/path.js", "another/file.py"],
-                        "difficulty": "easy|medium|hard",
-                        "verification_type": "github_api"
+                        "name": "Specific implementation task (e.g., 'Create ContactForm Component with Validation')",
+                        "description": "Detailed 8-15 sentence implementation guide: 1) Create specific file(s) with exact names 2) Implement specific functionality with clear requirements 3) Add specific imports/exports 4) Include error handling or validation 5) Add styling or configuration 6) Test the implementation 7) Commit with specific message. Include acceptance criteria that can be verified by checking file existence, content patterns, or commit messages.",
+                        "files_to_study": ["src/components/ExistingComponent.js", "src/utils/validation.js"],
+                        "difficulty": "easy",
+                        "verification_type": "file_creation",
+                        "verification_criteria": {{
+                            "required_files": ["src/components/ContactForm.js"],
+                            "file_content_patterns": ["export default", "useState", "onSubmit"],
+                            "commit_message_pattern": "Add ContactForm component"
+                        }}
                     }}
                 }}
             ]

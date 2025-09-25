@@ -1586,6 +1586,268 @@ async def verify_readme_update_task(session: AsyncSession, project_id: int, task
             'error': f'README verification failed: {str(e)}'
         }
 
+async def verify_directory_structure_task(session: AsyncSession, project_id: int, task_id: int, username: str, repo_name: str) -> Dict[str, Any]:
+    """
+    Verify that specific directory structure was created in the repository
+    
+    Args:
+        session: Database session
+        project_id: ID of the project
+        task_id: ID of the task
+        username: GitHub username
+        repo_name: GitHub repository name
+    
+    Returns:
+        Dictionary with verification result
+    """
+    import requests
+    import os
+    import json
+    
+    try:
+        # Get task details to see what directories should be checked
+        result = await session.execute(text("""
+            SELECT description, verification_data FROM tasks 
+            WHERE task_id = :task_id
+        """), {'task_id': task_id})
+        
+        task_data = result.fetchone()
+        if not task_data:
+            return {
+                'success': False,
+                'error': 'Task not found'
+            }
+        
+        description = task_data[0]
+        verification_data = task_data[1]
+        
+        # Parse verification criteria to get expected directories
+        expected_dirs = []
+        if verification_data:
+            try:
+                data = json.loads(verification_data)
+                criteria = data.get('verification_criteria', {})
+                expected_dirs = criteria.get('required_directories', [])
+            except:
+                # Extract from description if no JSON data
+                if 'src/' in description:
+                    expected_dirs.append('src')
+                if 'components/' in description:
+                    expected_dirs.append('src/components')
+                if 'utils/' in description:
+                    expected_dirs.append('src/utils')
+        
+        if not expected_dirs:
+            # Default directories for common project structures
+            expected_dirs = ['src']
+        
+        # Use GitHub API to check repository structure
+        github_token = os.getenv('GITHUB_ACCESS_TOKEN')
+        headers = {}
+        if github_token:
+            headers['Authorization'] = f'token {github_token}'
+        
+        found_dirs = []
+        missing_dirs = []
+        
+        for expected_dir in expected_dirs:
+            api_url = f'https://api.github.com/repos/{username}/{repo_name}/contents/{expected_dir}'
+            response = requests.get(api_url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                found_dirs.append(expected_dir)
+            else:
+                missing_dirs.append(expected_dir)
+        
+        if missing_dirs:
+            return {
+                'success': False,
+                'error': f'Missing required directories: {", ".join(missing_dirs)}'
+            }
+        
+        # Update task verification
+        await session.execute(text("""
+            UPDATE tasks 
+            SET verification_data = :verification_data, is_verified = TRUE, is_completed = TRUE
+            WHERE task_id = :task_id
+        """), {
+            'task_id': task_id,
+            'verification_data': json.dumps({
+                'expected_directories': expected_dirs,
+                'found_directories': found_dirs,
+                'repository': f'{username}/{repo_name}',
+                'verified_at': None  # Will be set by database
+            })
+        })
+        
+        await session.commit()
+        
+        print(f"✅ Directory structure verified for task {task_id}: {found_dirs}")
+        
+        return {
+            'success': True,
+            'message': f'Directory structure verified successfully! Found: {", ".join(found_dirs)}',
+            'directory_info': {
+                'expected_directories': expected_dirs,
+                'found_directories': found_dirs,
+                'repository': f'{username}/{repo_name}'
+            }
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'success': False,
+            'error': f'Failed to connect to GitHub API: {str(e)}'
+        }
+    except Exception as e:
+        await session.rollback()
+        return {
+            'success': False,
+            'error': f'Directory structure verification failed: {str(e)}'
+        }
+
+async def verify_code_implementation_task(session: AsyncSession, project_id: int, task_id: int, username: str, repo_name: str) -> Dict[str, Any]:
+    """
+    Verify that specific code patterns were implemented in repository files
+    
+    Args:
+        session: Database session
+        project_id: ID of the project
+        task_id: ID of the task
+        username: GitHub username
+        repo_name: GitHub repository name
+    
+    Returns:
+        Dictionary with verification result
+    """
+    import requests
+    import os
+    import json
+    import base64
+    
+    try:
+        # Get task details to see what code patterns should be checked
+        result = await session.execute(text("""
+            SELECT description, verification_data FROM tasks 
+            WHERE task_id = :task_id
+        """), {'task_id': task_id})
+        
+        task_data = result.fetchone()
+        if not task_data:
+            return {
+                'success': False,
+                'error': 'Task not found'
+            }
+        
+        description = task_data[0]
+        verification_data = task_data[1]
+        
+        # Parse verification criteria
+        required_files = []
+        content_patterns = []
+        
+        if verification_data:
+            try:
+                data = json.loads(verification_data)
+                criteria = data.get('verification_criteria', {})
+                required_files = criteria.get('required_files', [])
+                content_patterns = criteria.get('file_content_patterns', [])
+            except:
+                # Extract from description if no JSON data
+                if 'component' in description.lower():
+                    content_patterns = ['export default', 'function', 'return']
+                if 'useState' in description:
+                    content_patterns.append('useState')
+                if 'API' in description:
+                    content_patterns.extend(['fetch', 'axios', 'api'])
+        
+        if not required_files or not content_patterns:
+            return {
+                'success': False,
+                'error': 'No verification criteria specified for code implementation'
+            }
+        
+        # Use GitHub API to check file contents
+        github_token = os.getenv('GITHUB_ACCESS_TOKEN')
+        headers = {}
+        if github_token:
+            headers['Authorization'] = f'token {github_token}'
+        
+        verified_files = []
+        missing_patterns = []
+        
+        for file_path in required_files:
+            api_url = f'https://api.github.com/repos/{username}/{repo_name}/contents/{file_path}'
+            response = requests.get(api_url, headers=headers, timeout=10)
+            
+            if response.status_code != 200:
+                return {
+                    'success': False,
+                    'error': f'Required file not found: {file_path}'
+                }
+            
+            file_data = response.json()
+            content = base64.b64decode(file_data['content']).decode('utf-8')
+            
+            found_patterns = []
+            for pattern in content_patterns:
+                if pattern in content:
+                    found_patterns.append(pattern)
+                else:
+                    missing_patterns.append(f'{pattern} in {file_path}')
+            
+            verified_files.append({
+                'file': file_path,
+                'found_patterns': found_patterns
+            })
+        
+        if missing_patterns:
+            return {
+                'success': False,
+                'error': f'Missing required code patterns: {", ".join(missing_patterns)}'
+            }
+        
+        # Update task verification
+        await session.execute(text("""
+            UPDATE tasks 
+            SET verification_data = :verification_data, is_verified = TRUE, is_completed = TRUE
+            WHERE task_id = :task_id
+        """), {
+            'task_id': task_id,
+            'verification_data': json.dumps({
+                'required_files': required_files,
+                'content_patterns': content_patterns,
+                'verified_files': verified_files,
+                'repository': f'{username}/{repo_name}',
+                'verified_at': None  # Will be set by database
+            })
+        })
+        
+        await session.commit()
+        
+        print(f"✅ Code implementation verified for task {task_id}")
+        
+        return {
+            'success': True,
+            'message': f'Code implementation verified successfully! All required patterns found.',
+            'implementation_info': {
+                'verified_files': verified_files,
+                'repository': f'{username}/{repo_name}'
+            }
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'success': False,
+            'error': f'Failed to connect to GitHub API: {str(e)}'
+        }
+    except Exception as e:
+        await session.rollback()
+        return {
+            'success': False,
+            'error': f'Code implementation verification failed: {str(e)}'
+        }
+
 async def get_day_verification_status(session: AsyncSession, project_id: int, day_number: int) -> Dict[str, Any]:
     """
     Get detailed verification status for a specific day

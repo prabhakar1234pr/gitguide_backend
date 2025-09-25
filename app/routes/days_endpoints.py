@@ -24,7 +24,9 @@ from app.routes.shared.days_utilities import (
     verify_repository_creation_task,
     verify_file_creation_task,
     verify_readme_update_task,
-    verify_commit_task
+    verify_commit_task,
+    verify_directory_structure_task,
+    verify_code_implementation_task
 )
 
 router = APIRouter()
@@ -514,6 +516,12 @@ async def auto_verify_tasks_endpoint(
             elif verification_type == 'readme_update':
                 # Check if README was updated
                 verification_result = await verify_readme_update_task(db, project_id, task_id, username, repo_name)
+            elif verification_type == 'directory_structure':
+                # Check if specific directory structure was created
+                verification_result = await verify_directory_structure_task(db, project_id, task_id, username, repo_name)
+            elif verification_type == 'code_implementation':
+                # Check if specific code patterns were implemented
+                verification_result = await verify_code_implementation_task(db, project_id, task_id, username, repo_name)
             else:
                 # Skip tasks that require manual input
                 continue
